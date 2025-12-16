@@ -126,6 +126,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         }
         
         // --- Robust FFmpeg Implementation ---
+        const fontPath = path.join(__dirname, 'fonts', 'arial.ttf');
 
         // 1. Validation
         if (!fs.existsSync(fontPath)) {
