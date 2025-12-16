@@ -170,19 +170,21 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                     .input(textBgPath)
                     .complexFilter(filterChain)
                     .outputOptions([
-                        `-map ${finalOutput}`, // Explicitly map the final stream
+                        `-map ${finalOutput}`, 
                         '-c:v libx264',
-                        '-preset ultrafast',
+                        '-preset ultrafast', // Lowest memory usage for Free Tier
+                        '-crf 30',          // Higher CRF = Smaller File (compensates for ultrafast)
+                        '-threads 1',       // Force single thread to prevent OOM (SIGKILL)
                         '-movflags +faststart',
                         '-pix_fmt yuv420p',
                         '-y'
                     ])
                     .on('start', (cmd) => {
                          console.log(`🎬 FFmpeg Start (${withText ? 'Text' : 'Fallback'})`);
-                         console.log(`Filters: ${JSON.stringify(filterChain)}`);
+                         // console.log(cmd);
                     })
                     .on('progress', (progress) => {
-                        // Progress calculation
+                        // ... existing progress logic ...
                          const timemark = progress.timemark || '00:00:00';
                          const timeParts = timemark.split(':');
                          let currentSeconds = 0;
@@ -200,6 +202,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         };
 
         // 4. Execution Strategy
+        let textError = null;
         try {
             // Attempt 1: With Text
             try {
@@ -207,6 +210,11 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                 console.log('✅ Render Success (With Text)');
             } catch (err) {
                 console.error(`⚠️ Text Render Failed: ${err.message}`);
+                textError = err.message; // Capture error
+                // Show error in UI status for 3 seconds so user can see it
+                sendEvent('progress', { percent: 0, status: `Text Error: ${err.message.substring(0, 50)}...` });
+                // We don't sleep here, but the frontend might see it briefly.
+                // Better yet, log it clearly.
                 console.log('🔄 Retrying without text (Fallback)...');
                 await renderVideo(false);
                 console.log('✅ Render Success (Fallback)');
@@ -216,7 +224,12 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             const protocol = req.get('host').includes('localhost') ? 'http' : 'https';
             const downloadUrl = `${protocol}://${req.get('host')}/download/${outputFilename}`;
             
-            sendEvent('complete', { url: downloadUrl, name: outputFilename });
+            // Send complete event with warning if text failed
+            sendEvent('complete', { 
+                url: downloadUrl, 
+                name: outputFilename,
+                warning: textError ? `Text failed: ${textError}` : null
+            });
             
             // Cleanup
             try {
