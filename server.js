@@ -136,66 +136,71 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             textBgX = 10; // 10px margin from left edge
         }
         
-        // --- Robust FFmpeg Implementation ---
-        const fontPath = path.join(__dirname, 'fonts', 'arial.ttf');
+        sendEvent('progress', { percent: 28, status: 'Generating text layer...' });
 
-        // 1. Validation
-        if (!fs.existsSync(fontPath)) {
-            console.error(`❌ CRITICAL: Font missing at ${fontPath}`);
-            // We proceed to try text, but it will likely fail and trigger fallback.
+        // --- Text-as-Image Strategy (100% Reliability) ---
+        // Instead of asking FFmpeg to render fonts (which fails), we create a PNG image of the text.
+        const textImagePath = path.join(TEMP_DIR, `textimg-${Date.now()}.png`);
+        
+        // Escape XML characters in name
+        const safeName = doctorName.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        
+        const textSvg = `
+            <svg width="${textBoxWidth}" height="${textBoxHeight}">
+                <style>
+                    .text { fill: white; font-size: ${fontSize}px; font-family: Arial, sans-serif; font-weight: bold; }
+                </style>
+                <text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" class="text">${safeName}</text>
+            </svg>
+        `;
+        
+        try {
+            await sharp(Buffer.from(textSvg)).png().toFile(textImagePath);
+        } catch (imgErr) {
+            console.error("Text Image Generation Failed:", imgErr);
+            // If text gen fails, we can either throw or proceed without text. 
+            // We'll proceed (file won't exist, logic needs to handle that or we just throw).
+            throw new Error("Failed to generate text image: " + imgErr.message);
         }
 
-        // 2. Constants & Helpers
+        // --- Final FFmpeg Render ---
         const outputFilename = `video-${Date.now()}.mp4`;
         const outputPath = path.join(OUTPUT_DIR, outputFilename);
-        
-        // Helper: Sanitize paths for FFmpeg on Linux/Windows
-        const sanitizePath = (p) => p.split(path.sep).join('/').replace(/:/g, '\\\\:');
-        
-        const safeFontPath = sanitizePath(fontPath);
-        const textFilePath = path.join(TEMP_DIR, `text-${Date.now()}.txt`);
-        const safeTextFilePath = sanitizePath(textFilePath);
-        
-        // Write text file
-        fs.writeFileSync(textFilePath, doctorName);
 
-        // 3. Render Function (Supports Retry)
-        const renderVideo = async (withText) => {
-            return new Promise((resolve, reject) => {
+        const renderVideo = async () => {
+             return new Promise((resolve, reject) => {
                 let filterChain = [];
-                let finalOutput = '[v2]'; // Default end of chain if no text
                 
-                // Linear operations: [0:v] -> [v1] -> [v2]
+                // 1. Overlay Text Background Box [0:v] + [2:v] -> [v1]
                 filterChain.push(`[0:v][2:v]overlay=x=${textBgX}:y=${textBgY}[v1]`);
+                
+                // 2. Overlay User Image [v1] + [1:v] -> [v2]
                 filterChain.push(`[v1][1:v]overlay=x=${imageX}:y=${imageY}[v2]`);
                 
-                if (withText) {
-                    // Safe command with quoted paths
-                    // Note: We MUST output to a label so we can map it
-                    filterChain.push(`[v2]drawtext=fontfile='${safeFontPath}':textfile='${safeTextFilePath}':fontcolor=white:fontsize=${fontSize}:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16[v3]`);
-                    finalOutput = '[v3]';
-                }
+                // 3. Overlay Text Image [v2] + [3:v] -> [v3] (Final)
+                // We use the same coordinates as the background box, but maybe adjusted?
+                // The SVG is same size as box, so (textBgX, textBgY) is perfect.
+                filterChain.push(`[v2][3:v]overlay=x=${textBgX}:y=${textBgY}[v3]`);
 
                 ffmpeg(videoPath)
-                    .input(processedImagePath)
-                    .input(textBgPath)
+                    .input(processedImagePath) // [1:v]
+                    .input(textBgPath)         // [2:v]
+                    .input(textImagePath)      // [3:v]
                     .complexFilter(filterChain)
                     .outputOptions([
-                        `-map ${finalOutput}`, 
+                        `-map [v3]`,         // Map final output
                         '-c:v libx264',
-                        '-preset ultrafast', // Lowest memory usage for Free Tier
-                        '-crf 30',          // Higher CRF = Smaller File (compensates for ultrafast)
-                        '-threads 1',       // Force single thread to prevent OOM (SIGKILL)
+                        '-preset ultrafast', // Low Memory
+                        '-crf 30',           // Small Size
+                        '-threads 1',        // Stability
                         '-movflags +faststart',
                         '-pix_fmt yuv420p',
                         '-y'
                     ])
-                    .on('start', (cmd) => {
-                         console.log(`🎬 FFmpeg Start (${withText ? 'Text' : 'Fallback'})`);
-                         // console.log(cmd);
+                    .on('start', () => {
+                         console.log(`🎬 FFmpeg Start (Image Overlay Mode)`);
                     })
                     .on('progress', (progress) => {
-                        // ... existing progress logic ...
                          const timemark = progress.timemark || '00:00:00';
                          const timeParts = timemark.split(':');
                          let currentSeconds = 0;
@@ -204,7 +209,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                          }
                          const duration = 152; 
                          const percent = Math.min((currentSeconds / duration) * 100, 100);
-                         sendEvent('progress', { percent: Math.round(percent), status: withText ? 'Rendering...' : 'Rendering (Fallback mode)...' });
+                         sendEvent('progress', { percent: Math.round(percent), status: 'Rendering...' });
                     })
                     .on('end', resolve)
                     .on('error', reject)
@@ -212,24 +217,16 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             });
         };
 
-        // 4. Execution Strategy
-        let textError = null;
+        // Execution
         try {
-            // Attempt 1: With Text
-            try {
-                await renderVideo(true);
-                console.log('✅ Render Success (With Text)');
-            } catch (err) {
-                console.error(`⚠️ Text Render Failed: ${err.message}`);
-                textError = err.message; // Capture error
-                // Show error in UI status for 3 seconds so user can see it
-                sendEvent('progress', { percent: 0, status: `Text Error: ${err.message.substring(0, 50)}...` });
-                // We don't sleep here, but the frontend might see it briefly.
-                // Better yet, log it clearly.
-                console.log('🔄 Retrying without text (Fallback)...');
-                await renderVideo(false);
-                console.log('✅ Render Success (Fallback)');
-            }
+            await renderVideo();
+            console.log('✅ Render Success');
+        } catch (err) {
+            console.error(`Render Failed: ${err.message}`);
+            // Fallback? If Sharp failed, we already threw. If FFmpeg failed here, it's not text related.
+            // We can re-throw to trigger fatal handler.
+            throw err; 
+        }
 
             // 5. Success Response
             const protocol = req.get('host').includes('localhost') ? 'http' : 'https';
@@ -247,6 +244,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                 if (fs.existsSync(originalImagePath)) fs.unlinkSync(originalImagePath);
                 if (fs.existsSync(processedImagePath)) fs.unlinkSync(processedImagePath);
                 if (fs.existsSync(textBgPath)) fs.unlinkSync(textBgPath);
+                if (fs.existsSync(textImagePath)) fs.unlinkSync(textImagePath);
                 if (fs.existsSync(textFilePath)) fs.unlinkSync(textFilePath);
             } catch (e) { console.error("Cleanup error:", e); }
             
