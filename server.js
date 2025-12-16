@@ -190,8 +190,10 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             })
             .on('end', () => {
                 console.log('✅ Video Generated Successfully!');
+                const protocol = req.get('host').includes('localhost') ? 'http' : 'https';
+                const downloadUrl = `${protocol}://${req.get('host')}/download/${outputFilename}`;
                 sendEvent('progress', { percent: 100, status: 'Complete!' });
-                sendEvent('complete', { url: `http://localhost:3001/download/${outputFilename}`, name: outputFilename });
+                sendEvent('complete', { url: downloadUrl, name: outputFilename });
                 
                 try {
                     fs.unlinkSync(originalImagePath);
