@@ -154,16 +154,8 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         const outputFilename = `video-${Date.now()}.mp4`;
         const outputPath = path.join(OUTPUT_DIR, outputFilename);
         
-        // Helper: Sanitize paths for FFmpeg on Linux/Windows
-        // Improved sanitization: forward slashes, escaped colons, escaped spaces, escaped parens
-        const sanitizePath = (p) => {
-            return p.split(path.sep).join('/')
-                .replace(/:/g, '\\\\:')
-                .replace(/ /g, '\\\\ ')
-                .replace(/\(/g, '\\\\(')
-                .replace(/\)/g, '\\\\)')
-                .replace(/'/g, '\\\\\'');
-        };
+        // Helper: Sanitize paths - Just normalize slashes, let the library handle escaping!
+        const sanitizePath = (p) => p.split(path.sep).join('/');
         
         const safeFontPath = sanitizePath(fontPath);
         const textFilePath = path.join(TEMP_DIR, `text-${Date.now()}.txt`);
@@ -175,17 +167,34 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         // 3. Render Function
         const renderVideo = async () => {
             return new Promise((resolve, reject) => {
-                let filterChain = [];
-                
-                // 1. Overlay Text Background [0:v][2:v] -> [v1]
-                filterChain.push(`[0:v][2:v]overlay=x=${textBgX}:y=${textBgY}[v1]`);
-                
-                // 2. Overlay User Photo [v1][1:v] -> [v2]
-                filterChain.push(`[v1][1:v]overlay=x=${imageX}:y=${imageY}[v2]`);
-                
-                // 3. Draw Text [v2] -> [v3]
-                // REMOVED QUOTES around fontfile/textfile. Used robust escaping instead.
-                filterChain.push(`[v2]drawtext=fontfile=${safeFontPath}:textfile=${safeTextFilePath}:fontcolor=white:fontsize=${fontSize}:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16[v3]`);
+                // OBJECT-BASED FILTER CHAIN (The safe way)
+                const filterChain = [
+                    {
+                        filter: 'overlay',
+                        options: { x: textBgX, y: textBgY },
+                        inputs: ['0:v', '2:v'],
+                        outputs: 'v1'
+                    },
+                    {
+                        filter: 'overlay',
+                        options: { x: imageX, y: imageY },
+                        inputs: ['v1', '1:v'],
+                        outputs: 'v2'
+                    },
+                    {
+                        filter: 'drawtext',
+                        options: {
+                            fontfile: safeFontPath,
+                            textfile: safeTextFilePath,
+                            fontcolor: 'white',
+                            fontsize: fontSize,
+                            x: `${textBgX}+(${textBoxWidth}-tw)/2`,
+                            y: `${textBgY}+16`
+                        },
+                        inputs: 'v2',
+                        outputs: 'v3'
+                    }
+                ];
 
                 ffmpeg(videoPath)
                     .input(processedImagePath)
@@ -202,7 +211,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                         '-y'
                     ])
                     .on('start', (cmd) => {
-                         console.log(`🎬 FFmpeg Start (Drawtext Mode)`);
+                         console.log(`🎬 FFmpeg Start (Object Filter Mode)`);
                     })
                     .on('progress', (progress) => {
                          const timemark = progress.timemark || '00:00:00';
