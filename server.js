@@ -154,10 +154,12 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             .input(textBgPath)
             .complexFilter([
                 `[0:v][2:v]overlay=x=${textBgX}:y=${textBgY}[v1]`,
-                `[v1][1:v]overlay=x=${imageX}:y=${imageY}[v2]`,
-                `[v2]drawtext=fontfile=${ffmpegFontPath}:textfile=${ffmpegTextFilePath}:fontcolor=white:fontsize=${fontSize}:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16`
+                `[v1][1:v]overlay=x=${imageX}:y=${imageY}[v2]`
+                // Temporarily removed drawtext to debug
             ])
+            // Map the last output [v2] to the final file
             .outputOptions([
+                '-map [v2]',
                 '-c:v libx264',
                 '-preset ultrafast',
                 '-movflags +faststart',
