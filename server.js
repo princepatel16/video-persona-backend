@@ -100,15 +100,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         const textBoxWidth = Math.min(Math.max(textWidth + textPadding, 240), 800);
         const textBoxHeight = 80;
         
-        // Create dynamic text background
-        const textBgPath = path.join(TEMP_DIR, `textbg-${Date.now()}.png`);
-        const roundedRectSvg = `
-            <svg width="${textBoxWidth}" height="${textBoxHeight}">
-                <rect width="${textBoxWidth}" height="${textBoxHeight}" rx="8" ry="8" fill="rgba(0,0,0,0.7)" />
-            </svg>
-        `;
-        
-        await sharp(Buffer.from(roundedRectSvg)).png().toFile(textBgPath);
+
 
         sendEvent('progress', { percent: 25, status: 'Merging video...' });
 
@@ -154,7 +146,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         const outputFilename = `video-${Date.now()}.mp4`;
         const outputPath = path.join(OUTPUT_DIR, outputFilename);
         
-        // Helper: Sanitize paths - Just normalize slashes, let the library handle escaping!
+        // Helper: Sanitize paths - Just normalize slashes
         const sanitizePath = (p) => p.split(path.sep).join('/');
         
         const safeFontPath = sanitizePath(fontPath);
@@ -164,44 +156,20 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         // Write text file
         fs.writeFileSync(textFilePath, doctorName);
 
-        // 3. Render Function
+        // 3. Render Function (Simplified Strategy - User "FIX 1")
         const renderVideo = async () => {
             return new Promise((resolve, reject) => {
-                // OBJECT-BASED FILTER CHAIN (The safe way)
-                const filterChain = [
-                    {
-                        filter: 'overlay',
-                        options: { x: textBgX, y: textBgY },
-                        inputs: ['0:v', '2:v'],
-                        outputs: 'v1'
-                    },
-                    {
-                        filter: 'overlay',
-                        options: { x: imageX, y: imageY },
-                        inputs: ['v1', '1:v'],
-                        outputs: 'v2'
-                    },
-                    {
-                        filter: 'drawtext',
-                        options: {
-                            fontfile: safeFontPath,
-                            textfile: safeTextFilePath,
-                            fontcolor: 'white',
-                            fontsize: fontSize,
-                            x: `${textBgX}+(${textBoxWidth}-tw)/2`,
-                            y: `${textBgY}+16`
-                        },
-                        inputs: 'v2',
-                        outputs: 'v3'
-                    }
-                ];
+                
+                // Construct Linear Filter Graph
+                // [0:v][1:v]overlay... result passed directly to drawtext
+                // Using box=1 to replace the need for a separate background image input
+                const filterString = `[0:v][1:v]overlay=x=${imageX}:y=${imageY},drawtext=fontfile=${safeFontPath}:textfile=${safeTextFilePath}:fontcolor=white:fontsize=${fontSize}:box=1:boxcolor=black@0.7:boxborderw=20:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16`;
 
                 ffmpeg(videoPath)
-                    .input(processedImagePath)
-                    .input(textBgPath)
-                    .complexFilter(filterChain)
+                    .input(processedImagePath) // [1:v]
+                    // .input(textBgPath) REMOVED to simplify inputs
+                    .complexFilter(filterString)
                     .outputOptions([
-                        `-map [v3]`,         // Explicitly map final stream
                         '-c:v libx264',
                         '-preset ultrafast', // Low Memory
                         '-crf 30',           // Small Size
@@ -211,7 +179,8 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                         '-y'
                     ])
                     .on('start', (cmd) => {
-                         console.log(`🎬 FFmpeg Start (Object Filter Mode)`);
+                         console.log(`🎬 FFmpeg Start (Simplified Linear Mode)`);
+                         console.log(`Command: ${cmd}`);
                     })
                     .on('progress', (progress) => {
                          const timemark = progress.timemark || '00:00:00';
@@ -254,7 +223,6 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             try {
                 if (fs.existsSync(originalImagePath)) fs.unlinkSync(originalImagePath);
                 if (fs.existsSync(processedImagePath)) fs.unlinkSync(processedImagePath);
-                if (fs.existsSync(textBgPath)) fs.unlinkSync(textBgPath);
                 if (fs.existsSync(textFilePath)) fs.unlinkSync(textFilePath);
             } catch (e) { console.error("Cleanup error:", e); }
             
