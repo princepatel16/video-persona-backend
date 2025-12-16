@@ -128,8 +128,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         const outputFilename = `video-${Date.now()}.mp4`;
         const outputPath = path.join(OUTPUT_DIR, outputFilename);
         const fontPath = path.join(__dirname, 'fonts', 'arial.ttf');
-        // FFmpeg requires forward slashes and escaped colons in filter strings
-        const ffmpegFontPath = fontPath.replace(/\\/g, '/').replace(/:/g, '\\\\:');
+
 
         if (!fs.existsSync(fontPath)) {
             console.error(`❌ Font file missing at: ${fontPath}`);
@@ -142,14 +141,13 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             throw new Error(`Font file not found at ${fontPath}. Please add 'arial.ttf' to the 'fonts' folder.`);
         }
 
-        // Escape special chars for FFmpeg drawtext
-        // 1. Escape slashes / -> \/ (if any, though uncommon in names)
-        // 2. Escape single quotes ' -> '\''
-        // 3. Escape colons : -> \:
-        const escapedDoctorName = doctorName
-            .replace(/\\/g, '\\\\') 
-            .replace(/:/g, '\\\\:')
-            .replace(/'/g, "'\\\\''");
+        // Create text file for doctor name to avoid escaping issues
+        const textFilePath = path.join(TEMP_DIR, `text-${Date.now()}.txt`);
+        fs.writeFileSync(textFilePath, doctorName);
+
+        // FFmpeg requires forward slashes and escaped colons in filter strings
+        const ffmpegFontPath = fontPath.replace(/\\/g, '/').replace(/:/g, '\\\\:');
+        const ffmpegTextFilePath = textFilePath.replace(/\\/g, '/').replace(/:/g, '\\\\:');
 
         ffmpeg(videoPath)
             .input(processedImagePath)
@@ -157,7 +155,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             .complexFilter([
                 `[0:v][2:v]overlay=x=${textBgX}:y=${textBgY}[v1]`,
                 `[v1][1:v]overlay=x=${imageX}:y=${imageY}[v2]`,
-                `[v2]drawtext=fontfile='${ffmpegFontPath}':text='${escapedDoctorName}':fontcolor=white:fontsize=${fontSize}:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16`
+                `[v2]drawtext=fontfile='${ffmpegFontPath}':textfile='${ffmpegTextFilePath}':fontcolor=white:fontsize=${fontSize}:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16`
             ])
             .outputOptions([
                 '-c:v libx264',
@@ -197,6 +195,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                     fs.unlinkSync(originalImagePath);
                     fs.unlinkSync(processedImagePath);
                     fs.unlinkSync(textBgPath);
+                    if (fs.existsSync(textFilePath)) fs.unlinkSync(textFilePath);
                 } catch (e) { console.error("Cleanup error:", e); }
                 
                 res.end();
