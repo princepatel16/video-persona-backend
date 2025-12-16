@@ -262,11 +262,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             if (fs.existsSync(textFilePath)) fs.unlinkSync(textFilePath);
         }
 
-    } catch (error) {
-        console.error("❌ Server Error:", error);
-        sendEvent('error', { error: error.message });
-        res.end();
-    }
+
 });
 
 // Download endpoint - sends file and deletes it
