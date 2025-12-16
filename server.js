@@ -37,9 +37,20 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
     res.flushHeaders();
 
     const sendEvent = (event, data) => {
-        res.write(`event: ${event}\n`);
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
+        if (!res.writableEnded) {
+            res.write(`event: ${event}\n`);
+            res.write(`data: ${JSON.stringify(data)}\n\n`);
+        }
     };
+
+    // Heartbeat to prevent timeouts
+    const heartbeat = setInterval(() => {
+        if (!res.writableEnded) res.write(': keep-alive\n\n');
+    }, 15000);
+
+    // Clean up heartbeat on finish/close
+    res.on('close', () => clearInterval(heartbeat));
+    res.on('finish', () => clearInterval(heartbeat));
 
     try {
         console.log("🚀 Starting Video Generation...");
@@ -282,6 +293,11 @@ app.get('/download/:filename', (req, res) => {
 app.use('/output', express.static(OUTPUT_DIR));
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`🚀 High-Performance Video Generator running on port ${PORT}`);
 });
+
+// Set timeouts to 10 minutes to support long video rendering
+server.setTimeout(10 * 60 * 1000);
+server.keepAliveTimeout = 120 * 1000;
+server.headersTimeout = 120 * 1000;
