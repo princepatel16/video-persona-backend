@@ -125,96 +125,110 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             textBgX = 10; // 10px margin from left edge
         }
         
-        const outputFilename = `video-${Date.now()}.mp4`;
-        const outputPath = path.join(OUTPUT_DIR, outputFilename);
-        const fontPath = path.join(__dirname, 'fonts', 'arial.ttf');
+        // --- Robust FFmpeg Implementation ---
 
-
+        // 1. Validation
         if (!fs.existsSync(fontPath)) {
-            console.error(`❌ Font file missing at: ${fontPath}`);
-            // Fallback for Windows local dev if file missing
-            if (process.platform === 'win32') {
-                 console.log("⚠️ Using Windows system font as fallback");
-                 // Use the path variable but we can't reassign const, so we should have used let.
-                 // Refactoring slightly to just warn.
-            }
-            throw new Error(`Font file not found at ${fontPath}. Please add 'arial.ttf' to the 'fonts' folder.`);
+            console.error(`❌ CRITICAL: Font missing at ${fontPath}`);
+            // We proceed to try text, but it will likely fail and trigger fallback.
         }
 
-        // Create text file for doctor name to avoid escaping issues
+        // 2. Constants & Helpers
+        const outputFilename = `video-${Date.now()}.mp4`;
+        const outputPath = path.join(OUTPUT_DIR, outputFilename);
+        
+        // Helper: Sanitize paths for FFmpeg on Linux/Windows
+        const sanitizePath = (p) => p.split(path.sep).join('/').replace(/:/g, '\\\\:');
+        
+        const safeFontPath = sanitizePath(fontPath);
         const textFilePath = path.join(TEMP_DIR, `text-${Date.now()}.txt`);
+        const safeTextFilePath = sanitizePath(textFilePath);
+        
+        // Write text file
         fs.writeFileSync(textFilePath, doctorName);
 
-        // FFmpeg Path Normalization Helper
-        // 1. Force forward slashes (Windows uses backslashes)
-        // 2. Escape colons (required for filter parameters)
-        // 3. Wrap in single quotes is NOT done here, we do it in the command string if needed, 
-        //    but escaping colons is usually enough for the 'textfile=' argument if no spaces are present.
-        const sanitizePath = (p) => p.replace(/\\/g, '/').replace(/:/g, '\\\\:');
-
-        const ffmpegFontPath = sanitizePath(fontPath);
-        const ffmpegTextFilePath = sanitizePath(textFilePath);
-
-        ffmpeg(videoPath)
-            .input(processedImagePath)
-            .input(textBgPath)
-            .complexFilter([
-                `[0:v][2:v]overlay=x=${textBgX}:y=${textBgY}[v1]`,
-                `[v1][1:v]overlay=x=${imageX}:y=${imageY}[v2]`,
-                // Use single quotes around paths AND escaped colons for maximum safety
-                `[v2]drawtext=fontfile='${ffmpegFontPath}':textfile='${ffmpegTextFilePath}':fontcolor=white:fontsize=${fontSize}:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16`
-            ])
-            .outputOptions([
-                '-c:v libx264',
-                '-preset ultrafast',
-                '-movflags +faststart',
-                '-pix_fmt yuv420p'
-            ])
-            .on('start', () => {
-                console.log('🎬 FFmpeg started');
-                sendEvent('progress', { percent: 30, status: 'Encoding video...' });
-            })
-            .on('progress', (progress) => {
-                const timemark = progress.timemark || '00:00:00';
-                const timeParts = timemark.split(':');
-                if (timeParts.length === 3) {
-                    const hours = parseInt(timeParts[0]) || 0;
-                    const minutes = parseInt(timeParts[1]) || 0;
-                    const seconds = parseFloat(timeParts[2]) || 0;
-                    const currentSeconds = hours * 3600 + minutes * 60 + seconds;
-                    const estimatedDuration = 152; // 2 minutes 32 seconds
-                    const rawPercent = Math.min((currentSeconds / estimatedDuration) * 100, 100);
-                    const mappedPercent = Math.min(30 + Math.round(rawPercent * 0.65), 95);
-                    
-                    sendEvent('progress', { 
-                        percent: mappedPercent, 
-                        status: `Encoding: ${Math.round(rawPercent)}%`,
-                        timemark: timemark 
-                    });
+        // 3. Render Function (Supports Retry)
+        const renderVideo = async (withText) => {
+            return new Promise((resolve, reject) => {
+                let filterChain = [];
+                
+                // Linear operations: [0:v] -> [v1] -> [v2]
+                filterChain.push(`[0:v][2:v]overlay=x=${textBgX}:y=${textBgY}[v1]`);
+                filterChain.push(`[v1][1:v]overlay=x=${imageX}:y=${imageY}[v2]`);
+                
+                if (withText) {
+                    // Safe command with quoted paths
+                    filterChain.push(`[v2]drawtext=fontfile='${safeFontPath}':textfile='${safeTextFilePath}':fontcolor=white:fontsize=${fontSize}:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16`);
                 }
-            })
-            .on('end', () => {
-                console.log('✅ Video Generated Successfully!');
-                const protocol = req.get('host').includes('localhost') ? 'http' : 'https';
-                const downloadUrl = `${protocol}://${req.get('host')}/download/${outputFilename}`;
-                sendEvent('progress', { percent: 100, status: 'Complete!' });
-                sendEvent('complete', { url: downloadUrl, name: outputFilename });
-                
-                try {
-                    fs.unlinkSync(originalImagePath);
-                    fs.unlinkSync(processedImagePath);
-                    fs.unlinkSync(textBgPath);
-                    if (fs.existsSync(textFilePath)) fs.unlinkSync(textFilePath);
-                } catch (e) { console.error("Cleanup error:", e); }
-                
-                res.end();
-            })
-            .on('error', (err) => {
-                console.error('❌ FFmpeg Error:', err);
-                sendEvent('error', { error: 'Video generation failed: ' + err.message });
-                res.end();
-            })
-            .save(outputPath);
+
+                ffmpeg(videoPath)
+                    .input(processedImagePath)
+                    .input(textBgPath)
+                    .complexFilter(filterChain)
+                    .outputOptions([
+                        '-c:v libx264',
+                        '-preset ultrafast',
+                        '-movflags +faststart',
+                        '-pix_fmt yuv420p',
+                        '-y'
+                    ])
+                    .on('start', (cmd) => {
+                         console.log(`🎬 FFmpeg Start (${withText ? 'Text' : 'Fallback'})`);
+                         console.log(`Filters: ${JSON.stringify(filterChain)}`);
+                    })
+                    .on('progress', (progress) => {
+                        // Progress calculation
+                         const timemark = progress.timemark || '00:00:00';
+                         const timeParts = timemark.split(':');
+                         let currentSeconds = 0;
+                         if (timeParts.length === 3) {
+                             currentSeconds = (parseInt(timeParts[0])||0)*3600 + (parseInt(timeParts[1])||0)*60 + (parseFloat(timeParts[2])||0);
+                         }
+                         const duration = 152; 
+                         const percent = Math.min((currentSeconds / duration) * 100, 100);
+                         sendEvent('progress', { percent: Math.round(percent), status: withText ? 'Rendering...' : 'Rendering (Fallback mode)...' });
+                    })
+                    .on('end', resolve)
+                    .on('error', reject)
+                    .save(outputPath);
+            });
+        };
+
+        // 4. Execution Strategy
+        try {
+            // Attempt 1: With Text
+            try {
+                await renderVideo(true);
+                console.log('✅ Render Success (With Text)');
+            } catch (err) {
+                console.error(`⚠️ Text Render Failed: ${err.message}`);
+                console.log('🔄 Retrying without text (Fallback)...');
+                await renderVideo(false);
+                console.log('✅ Render Success (Fallback)');
+            }
+
+            // 5. Success Response
+            const protocol = req.get('host').includes('localhost') ? 'http' : 'https';
+            const downloadUrl = `${protocol}://${req.get('host')}/download/${outputFilename}`;
+            
+            sendEvent('complete', { url: downloadUrl, name: outputFilename });
+            
+            // Cleanup
+            try {
+                if (fs.existsSync(originalImagePath)) fs.unlinkSync(originalImagePath);
+                if (fs.existsSync(processedImagePath)) fs.unlinkSync(processedImagePath);
+                if (fs.existsSync(textBgPath)) fs.unlinkSync(textBgPath);
+                if (fs.existsSync(textFilePath)) fs.unlinkSync(textFilePath);
+            } catch (e) { console.error("Cleanup error:", e); }
+            
+            res.end();
+
+        } catch (fatalError) {
+            console.error("❌ Fatal Error:", fatalError);
+            sendEvent('error', { error: 'Render failed completely.' });
+            res.end();
+            if (fs.existsSync(textFilePath)) fs.unlinkSync(textFilePath);
+        }
 
     } catch (error) {
         console.error("❌ Server Error:", error);
