@@ -127,8 +127,10 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                     .input(overlayImagePath) // [1:v] - This is now the Full Badge (Photo+Text)
                     .complexFilter(filterChain)
                     .outputOptions([
-                        '-map [v1]',         // Map final output
+                        '-map [v1]',         // Map final video output
+                        '-map 0:a',          // Map audio from Input 0 (Base Video)
                         '-c:v libx264',
+                        '-c:a copy',         // Copy audio without re-encoding (Fast)
                         '-preset ultrafast', // Low Memory
                         '-crf 30',           // Small Size
                         '-threads 1',        // Stability
