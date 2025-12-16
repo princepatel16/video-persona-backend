@@ -71,37 +71,6 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
 
         sendEvent('progress', { percent: 10, status: 'Processing image...' });
 
-        // Process image - simple circle without shadow
-        const processedImagePath = path.join(TEMP_DIR, `circle-${Date.now()}.png`);
-        
-        const width = 230;
-        const height = 230;
-        
-        const circleBuffer = Buffer.from(
-            `<svg><circle cx="${width/2}" cy="${height/2}" r="${width/2}" /></svg>`
-        );
-
-        await sharp(originalImagePath)
-            .resize(width, height, { fit: 'cover' })
-            .composite([{
-                input: circleBuffer,
-                blend: 'dest-in'
-            }])
-            .png()
-            .toFile(processedImagePath);
-
-        sendEvent('progress', { percent: 20, status: 'Calculating text box...' });
-
-        // Calculate text box dimensions (must match preview CSS)
-        const fontSize = 48;
-        const charWidth = fontSize * 0.6; // Approximate character width
-        const textWidth = Math.ceil(doctorName.length * charWidth);
-        const textPadding = 40; // 20px on each side
-        const textBoxWidth = Math.min(Math.max(textWidth + textPadding, 240), 800);
-        const textBoxHeight = 80;
-        
-
-
         sendEvent('progress', { percent: 25, status: 'Merging video...' });
 
         const VIDEO_WIDTH = 1920;
@@ -112,27 +81,11 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         
         console.log(`📍 Received position: X=${overlayX_Pct}, Y=${overlayY_Pct}`);
         
-        // Simple positioning - no shadow padding
+        // Simple positioning - server just trusts the x/y
         const imageX = Math.round(overlayX_Pct * VIDEO_WIDTH);
         const imageY = Math.round(overlayY_Pct * VIDEO_HEIGHT);
         
         console.log(`📍 Calculated pixels: X=${imageX}px, Y=${imageY}px`);
-        
-        const gap = 17;
-        const circleCenterX = imageX + 115; // 115 = 230/2
-        let textBgX = circleCenterX - (textBoxWidth / 2);
-        const textBgY = imageY + 230 + gap;
-        
-        // Check if text box goes off screen and adjust
-        if (textBgX + textBoxWidth > VIDEO_WIDTH) {
-            textBgX = VIDEO_WIDTH - textBoxWidth - 10; // 10px margin from edge
-            console.log(`⚠️  Text box adjusted to prevent overflow`);
-        }
-        if (textBgX < 0) {
-            textBgX = 10; // 10px margin from left edge
-        }
-        
-        sendEvent('progress', { percent: 28, status: 'Generating text layer...' });
 
         // --- Robust FFmpeg Implementation (Restored with Fixes) ---
         const fontPath = path.join(__dirname, 'fonts', 'arial.ttf');
@@ -149,25 +102,15 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         // Helper: Sanitize paths - Just normalize slashes
         const sanitizePath = (p) => p.split(path.sep).join('/');
         
-        // Font Selection: Prefer System Font (User Recommendation), Fallback to Local Arial
-        const systemFontPath = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf';
-        const localFontPath = path.join(__dirname, 'fonts', 'arial.ttf');
-        const fontPathToUse = fs.existsSync(systemFontPath) ? systemFontPath : localFontPath;
-        
-        console.log(`ABC Using Font: ${fontPathToUse}`); // Debug log
+        // --- Client-Side Strategy ---
+        // The frontend sends a ready-made PNG with photo+text. We just overlay it.
+        const overlayImagePath = req.file.path; 
 
-        const safeFontPath = sanitizePath(fontPathToUse);
-        const textFilePath = path.join(TEMP_DIR, `text-${Date.now()}.txt`);
-        const safeTextFilePath = sanitizePath(textFilePath);
-        
-        // Write text file
-        fs.writeFileSync(textFilePath, doctorName);
-
-        // 3. Render Function (Object-Based + Simplified)
+        // 3. Render Function (Simplified "Stamper" Mode)
         const renderVideo = async () => {
             return new Promise((resolve, reject) => {
                 
-                // SAFE OBJECT-BASED CHAIN (Prevent Syntax Errors)
+                // Extremely Simple Filter: Video + Image -> Output
                 const filterChain = [
                     {
                         filter: 'overlay',
@@ -176,32 +119,15 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                             y: imageY 
                         },
                         inputs: ['0:v', '1:v'],
-                        outputs: 'tmp'
-                    },
-                    {
-                        filter: 'drawtext',
-                        options: {
-                            fontfile: safeFontPath,
-                            textfile: safeTextFilePath,
-                            fontcolor: 'white',
-                            fontsize: fontSize,
-                            box: 1,
-                            boxcolor: 'black@0.7',
-                            boxborderw: 20,
-                            x: `${textBgX}+(${textBoxWidth}-tw)/2`,
-                            y: `${textBgY}+16`
-                        },
-                        inputs: 'tmp',
-                        outputs: 'v3' // Final Output
+                        outputs: 'v1'
                     }
                 ];
 
                 ffmpeg(videoPath)
-                    .input(processedImagePath) // [1:v]
-                    // Inputs reduced to 2 (Video + Photo)
+                    .input(overlayImagePath) // [1:v] - This is now the Full Badge (Photo+Text)
                     .complexFilter(filterChain)
                     .outputOptions([
-                        '-map [v3]',         // Map our final output
+                        '-map [v1]',         // Map final output
                         '-c:v libx264',
                         '-preset ultrafast', // Low Memory
                         '-crf 30',           // Small Size
@@ -211,7 +137,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                         '-y'
                     ])
                     .on('start', (cmd) => {
-                         console.log(`🎬 FFmpeg Start (Safe Object Mode)`);
+                         console.log(`🎬 FFmpeg Start (Client Overlay Mode)`);
                          console.log(`Command: ${cmd}`);
                     })
                     .on('progress', (progress) => {
@@ -253,9 +179,8 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             
             // Cleanup
             try {
+                // req.file.path is the 'originalImagePath' we assigned to overlayImagePath
                 if (fs.existsSync(originalImagePath)) fs.unlinkSync(originalImagePath);
-                if (fs.existsSync(processedImagePath)) fs.unlinkSync(processedImagePath);
-                if (fs.existsSync(textFilePath)) fs.unlinkSync(textFilePath);
             } catch (e) { console.error("Cleanup error:", e); }
             
             res.end();
