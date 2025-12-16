@@ -155,14 +155,21 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         const outputPath = path.join(OUTPUT_DIR, outputFilename);
         
         // Helper: Sanitize paths for FFmpeg on Linux/Windows
-        // improved sanitization: forward slashes, escaped colons for filtergraph
-        const sanitizePath = (p) => p.split(path.sep).join('/').replace(/:/g, '\\\\:');
+        // Improved sanitization: forward slashes, escaped colons, escaped spaces, escaped parens
+        const sanitizePath = (p) => {
+            return p.split(path.sep).join('/')
+                .replace(/:/g, '\\\\:')
+                .replace(/ /g, '\\\\ ')
+                .replace(/\(/g, '\\\\(')
+                .replace(/\)/g, '\\\\)')
+                .replace(/'/g, '\\\\\'');
+        };
         
         const safeFontPath = sanitizePath(fontPath);
         const textFilePath = path.join(TEMP_DIR, `text-${Date.now()}.txt`);
         const safeTextFilePath = sanitizePath(textFilePath);
         
-        // Write text file to avoid command line escaping issues
+        // Write text file
         fs.writeFileSync(textFilePath, doctorName);
 
         // 3. Render Function
@@ -177,8 +184,8 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                 filterChain.push(`[v1][1:v]overlay=x=${imageX}:y=${imageY}[v2]`);
                 
                 // 3. Draw Text [v2] -> [v3]
-                // Using textfile strategy + fontfile strategy
-                filterChain.push(`[v2]drawtext=fontfile='${safeFontPath}':textfile='${safeTextFilePath}':fontcolor=white:fontsize=${fontSize}:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16[v3]`);
+                // REMOVED QUOTES around fontfile/textfile. Used robust escaping instead.
+                filterChain.push(`[v2]drawtext=fontfile=${safeFontPath}:textfile=${safeTextFilePath}:fontcolor=white:fontsize=${fontSize}:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16[v3]`);
 
                 ffmpeg(videoPath)
                     .input(processedImagePath)
