@@ -154,12 +154,10 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             .input(textBgPath)
             .complexFilter([
                 `[0:v][2:v]overlay=x=${textBgX}:y=${textBgY}[v1]`,
-                `[v1][1:v]overlay=x=${imageX}:y=${imageY}[v2]`
-                // Temporarily removed drawtext to debug
+                `[v1][1:v]overlay=x=${imageX}:y=${imageY}[v2]`,
+                `[v2]drawtext=fontfile=${ffmpegFontPath}:textfile=${ffmpegTextFilePath}:fontcolor=white:fontsize=${fontSize}:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16`
             ])
-            // Map the last output [v2] to the final file
             .outputOptions([
-                '-map [v2]',
                 '-c:v libx264',
                 '-preset ultrafast',
                 '-movflags +faststart',
@@ -177,7 +175,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                     const minutes = parseInt(timeParts[1]) || 0;
                     const seconds = parseFloat(timeParts[2]) || 0;
                     const currentSeconds = hours * 3600 + minutes * 60 + seconds;
-                    const estimatedDuration = 60;
+                    const estimatedDuration = 152; // 2 minutes 32 seconds
                     const rawPercent = Math.min((currentSeconds / estimatedDuration) * 100, 100);
                     const mappedPercent = Math.min(30 + Math.round(rawPercent * 0.65), 95);
                     
