@@ -152,6 +152,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         const renderVideo = async (withText) => {
             return new Promise((resolve, reject) => {
                 let filterChain = [];
+                let finalOutput = '[v2]'; // Default end of chain if no text
                 
                 // Linear operations: [0:v] -> [v1] -> [v2]
                 filterChain.push(`[0:v][2:v]overlay=x=${textBgX}:y=${textBgY}[v1]`);
@@ -159,7 +160,9 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                 
                 if (withText) {
                     // Safe command with quoted paths
-                    filterChain.push(`[v2]drawtext=fontfile='${safeFontPath}':textfile='${safeTextFilePath}':fontcolor=white:fontsize=${fontSize}:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16`);
+                    // Note: We MUST output to a label so we can map it
+                    filterChain.push(`[v2]drawtext=fontfile='${safeFontPath}':textfile='${safeTextFilePath}':fontcolor=white:fontsize=${fontSize}:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16[v3]`);
+                    finalOutput = '[v3]';
                 }
 
                 ffmpeg(videoPath)
@@ -167,6 +170,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                     .input(textBgPath)
                     .complexFilter(filterChain)
                     .outputOptions([
+                        `-map ${finalOutput}`, // Explicitly map the final stream
                         '-c:v libx264',
                         '-preset ultrafast',
                         '-movflags +faststart',
