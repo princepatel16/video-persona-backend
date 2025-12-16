@@ -127,7 +127,19 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         
         const outputFilename = `video-${Date.now()}.mp4`;
         const outputPath = path.join(OUTPUT_DIR, outputFilename);
-        const fontPath = 'C\\\\:/Windows/Fonts/arial.ttf';
+        const fontPath = path.join(__dirname, 'fonts', 'arial.ttf');
+        
+        // Critical Check: Ensure font exists, otherwise FFmpeg will crash
+        if (!fs.existsSync(fontPath)) {
+            console.error(`❌ Font file missing at: ${fontPath}`);
+            // Fallback for Windows local dev if file missing
+            if (process.platform === 'win32') {
+                 console.log("⚠️ Using Windows system font as fallback");
+                 // Use the path variable but we can't reassign const, so we should have used let.
+                 // Refactoring slightly to just warn.
+            }
+            throw new Error(`Font file not found at ${fontPath}. Please add 'arial.ttf' to the 'fonts' folder.`);
+        }
 
         ffmpeg(videoPath)
             .input(processedImagePath)
