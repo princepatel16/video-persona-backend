@@ -226,7 +226,8 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
 
         } catch (fatalError) {
             console.error("❌ Fatal Error:", fatalError);
-            sendEvent('error', { error: 'Render failed completely.' });
+            // Send the specific error message to help debugging
+            sendEvent('error', { error: 'Render failed completely. Details: ' + fatalError.message });
             res.end();
             if (fs.existsSync(textFilePath)) fs.unlinkSync(textFilePath);
         }
