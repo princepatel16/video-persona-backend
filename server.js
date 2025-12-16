@@ -13,6 +13,10 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 const app = express();
 app.use(cors());
 
+app.get('/', (req, res) => {
+    res.send('Video Persona Backend is Running 🚀');
+});
+
 // Directories
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 const OUTPUT_DIR = path.join(__dirname, 'public', 'output');
@@ -233,10 +237,10 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             const downloadUrl = `${protocol}://${req.get('host')}/download/${outputFilename}`;
             
             // Send complete event with warning if text failed
+            // Send complete event
             sendEvent('complete', { 
                 url: downloadUrl, 
-                name: outputFilename,
-                warning: textError ? `Text failed: ${textError}` : null
+                name: outputFilename
             });
             
             // Cleanup
