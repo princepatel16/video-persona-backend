@@ -145,9 +145,15 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         const textFilePath = path.join(TEMP_DIR, `text-${Date.now()}.txt`);
         fs.writeFileSync(textFilePath, doctorName);
 
-        // FFmpeg requires forward slashes and escaped colons in filter strings
-        const ffmpegFontPath = fontPath.replace(/\\/g, '/').replace(/:/g, '\\\\:');
-        const ffmpegTextFilePath = textFilePath.replace(/\\/g, '/').replace(/:/g, '\\\\:');
+        // FFmpeg Path Normalization Helper
+        // 1. Force forward slashes (Windows uses backslashes)
+        // 2. Escape colons (required for filter parameters)
+        // 3. Wrap in single quotes is NOT done here, we do it in the command string if needed, 
+        //    but escaping colons is usually enough for the 'textfile=' argument if no spaces are present.
+        const sanitizePath = (p) => p.replace(/\\/g, '/').replace(/:/g, '\\\\:');
+
+        const ffmpegFontPath = sanitizePath(fontPath);
+        const ffmpegTextFilePath = sanitizePath(textFilePath);
 
         ffmpeg(videoPath)
             .input(processedImagePath)
@@ -155,7 +161,8 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             .complexFilter([
                 `[0:v][2:v]overlay=x=${textBgX}:y=${textBgY}[v1]`,
                 `[v1][1:v]overlay=x=${imageX}:y=${imageY}[v2]`,
-                `[v2]drawtext=fontfile=${ffmpegFontPath}:textfile=${ffmpegTextFilePath}:fontcolor=white:fontsize=${fontSize}:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16`
+                // Use single quotes around paths AND escaped colons for maximum safety
+                `[v2]drawtext=fontfile='${ffmpegFontPath}':textfile='${ffmpegTextFilePath}':fontcolor=white:fontsize=${fontSize}:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16`
             ])
             .outputOptions([
                 '-c:v libx264',
