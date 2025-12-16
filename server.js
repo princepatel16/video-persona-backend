@@ -149,27 +149,59 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         // Helper: Sanitize paths - Just normalize slashes
         const sanitizePath = (p) => p.split(path.sep).join('/');
         
-        const safeFontPath = sanitizePath(fontPath);
+        // Font Selection: Prefer System Font (User Recommendation), Fallback to Local Arial
+        const systemFontPath = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf';
+        const localFontPath = path.join(__dirname, 'fonts', 'arial.ttf');
+        const fontPathToUse = fs.existsSync(systemFontPath) ? systemFontPath : localFontPath;
+        
+        console.log(`ABC Using Font: ${fontPathToUse}`); // Debug log
+
+        const safeFontPath = sanitizePath(fontPathToUse);
         const textFilePath = path.join(TEMP_DIR, `text-${Date.now()}.txt`);
         const safeTextFilePath = sanitizePath(textFilePath);
         
         // Write text file
         fs.writeFileSync(textFilePath, doctorName);
 
-        // 3. Render Function (Simplified Strategy - User "FIX 1")
+        // 3. Render Function (Object-Based + Simplified)
         const renderVideo = async () => {
             return new Promise((resolve, reject) => {
                 
-                // Construct Linear Filter Graph
-                // [0:v][1:v]overlay... result passed directly to drawtext
-                // Using box=1 to replace the need for a separate background image input
-                const filterString = `[0:v][1:v]overlay=x=${imageX}:y=${imageY},drawtext=fontfile=${safeFontPath}:textfile=${safeTextFilePath}:fontcolor=white:fontsize=${fontSize}:box=1:boxcolor=black@0.7:boxborderw=20:x=${textBgX}+(${textBoxWidth}-tw)/2:y=${textBgY}+16`;
+                // SAFE OBJECT-BASED CHAIN (Prevent Syntax Errors)
+                const filterChain = [
+                    {
+                        filter: 'overlay',
+                        options: { 
+                            x: imageX, 
+                            y: imageY 
+                        },
+                        inputs: ['0:v', '1:v'],
+                        outputs: 'tmp'
+                    },
+                    {
+                        filter: 'drawtext',
+                        options: {
+                            fontfile: safeFontPath,
+                            textfile: safeTextFilePath,
+                            fontcolor: 'white',
+                            fontsize: fontSize,
+                            box: 1,
+                            boxcolor: 'black@0.7',
+                            boxborderw: 20,
+                            x: `${textBgX}+(${textBoxWidth}-tw)/2`,
+                            y: `${textBgY}+16`
+                        },
+                        inputs: 'tmp',
+                        outputs: 'v3' // Final Output
+                    }
+                ];
 
                 ffmpeg(videoPath)
                     .input(processedImagePath) // [1:v]
-                    // .input(textBgPath) REMOVED to simplify inputs
-                    .complexFilter(filterString)
+                    // Inputs reduced to 2 (Video + Photo)
+                    .complexFilter(filterChain)
                     .outputOptions([
+                        '-map [v3]',         // Map our final output
                         '-c:v libx264',
                         '-preset ultrafast', // Low Memory
                         '-crf 30',           // Small Size
@@ -179,7 +211,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                         '-y'
                     ])
                     .on('start', (cmd) => {
-                         console.log(`🎬 FFmpeg Start (Simplified Linear Mode)`);
+                         console.log(`🎬 FFmpeg Start (Safe Object Mode)`);
                          console.log(`Command: ${cmd}`);
                     })
                     .on('progress', (progress) => {
