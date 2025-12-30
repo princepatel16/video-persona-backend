@@ -59,11 +59,11 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
     try {
         console.log("🚀 Starting Video Generation...");
         sendEvent('progress', { percent: 0, status: 'Starting...' });
-        
+
         const doctorName = req.body.doctorName || "Dr. Name";
         const originalImagePath = req.file.path;
-        const videoPath = path.join(__dirname, 'public', 'videos', 'hypertension_video english.mp4');
-        
+        const videoPath = path.join(__dirname, 'public', 'videos', 'Empagliflozin video.mp4');
+
         if (!fs.existsSync(videoPath)) {
             sendEvent('error', { error: "Base video not found." });
             return res.end();
@@ -75,16 +75,16 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
 
         const VIDEO_WIDTH = 1920;
         const VIDEO_HEIGHT = 1080;
-        
+
         let overlayX_Pct = parseFloat(req.body.overlayX) || 0.75;
         const overlayY_Pct = parseFloat(req.body.overlayY) || 0.6;
-        
+
         console.log(`📍 Received position: X=${overlayX_Pct}, Y=${overlayY_Pct}`);
-        
+
         // Simple positioning - server just trusts the x/y
         const imageX = Math.round(overlayX_Pct * VIDEO_WIDTH);
         const imageY = Math.round(overlayY_Pct * VIDEO_HEIGHT);
-        
+
         console.log(`📍 Calculated pixels: X=${imageX}px, Y=${imageY}px`);
 
         // --- Robust FFmpeg Implementation (Restored with Fixes) ---
@@ -98,25 +98,25 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         // 2. Constants & Helpers
         const outputFilename = `video-${Date.now()}.mp4`;
         const outputPath = path.join(OUTPUT_DIR, outputFilename);
-        
+
         // Helper: Sanitize paths - Just normalize slashes
         const sanitizePath = (p) => p.split(path.sep).join('/');
-        
+
         // --- Client-Side Strategy ---
         // The frontend sends a ready-made PNG with photo+text. We just overlay it.
-        const overlayImagePath = req.file.path; 
+        const overlayImagePath = req.file.path;
 
         // 3. Render Function (Simplified "Stamper" Mode)
         const renderVideo = async () => {
             return new Promise((resolve, reject) => {
-                
+
                 // Extremely Simple Filter: Video + Image -> Output
                 const filterChain = [
                     {
                         filter: 'overlay',
-                        options: { 
-                            x: imageX, 
-                            y: imageY 
+                        options: {
+                            x: imageX,
+                            y: imageY
                         },
                         inputs: ['0:v', '1:v'],
                         outputs: 'v1'
@@ -139,19 +139,19 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                         '-y'
                     ])
                     .on('start', (cmd) => {
-                         console.log(`🎬 FFmpeg Start (Client Overlay Mode)`);
-                         console.log(`Command: ${cmd}`);
+                        console.log(`🎬 FFmpeg Start (Client Overlay Mode)`);
+                        console.log(`Command: ${cmd}`);
                     })
                     .on('progress', (progress) => {
-                         const timemark = progress.timemark || '00:00:00';
-                         const timeParts = timemark.split(':');
-                         let currentSeconds = 0;
-                         if (timeParts.length === 3) {
-                             currentSeconds = (parseInt(timeParts[0])||0)*3600 + (parseInt(timeParts[1])||0)*60 + (parseFloat(timeParts[2])||0);
-                         }
-                         const duration = 152; 
-                         const percent = Math.min((currentSeconds / duration) * 100, 100);
-                         sendEvent('progress', { percent: Math.round(percent), status: 'Rendering...' });
+                        const timemark = progress.timemark || '00:00:00';
+                        const timeParts = timemark.split(':');
+                        let currentSeconds = 0;
+                        if (timeParts.length === 3) {
+                            currentSeconds = (parseInt(timeParts[0]) || 0) * 3600 + (parseInt(timeParts[1]) || 0) * 60 + (parseFloat(timeParts[2]) || 0);
+                        }
+                        const duration = 152;
+                        const percent = Math.min((currentSeconds / duration) * 100, 100);
+                        sendEvent('progress', { percent: Math.round(percent), status: 'Rendering...' });
                     })
                     .on('end', resolve)
                     .on('error', reject)
@@ -165,35 +165,35 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             console.log('✅ Render Success');
         } catch (err) {
             console.error(`Render Failed: ${err.message}`);
-            throw err; 
+            throw err;
         }
 
-            // 5. Success Response
-            const protocol = req.get('host').includes('localhost') ? 'http' : 'https';
-            const downloadUrl = `${protocol}://${req.get('host')}/download/${outputFilename}`;
-            
-            // Send complete event with warning if text failed
-            // Send complete event
-            sendEvent('complete', { 
-                url: downloadUrl, 
-                name: outputFilename
-            });
-            
-            // Cleanup
-            try {
-                // req.file.path is the 'originalImagePath' we assigned to overlayImagePath
-                if (fs.existsSync(originalImagePath)) fs.unlinkSync(originalImagePath);
-            } catch (e) { console.error("Cleanup error:", e); }
-            
-            res.end();
+        // 5. Success Response
+        const protocol = req.get('host').includes('localhost') ? 'http' : 'https';
+        const downloadUrl = `${protocol}://${req.get('host')}/download/${outputFilename}`;
 
-        } catch (fatalError) {
-            console.error("❌ Fatal Error:", fatalError);
-            // Send the specific error message to help debugging
-            sendEvent('error', { error: 'Render failed completely. Details: ' + fatalError.message });
-            res.end();
-            if (fs.existsSync(textFilePath)) fs.unlinkSync(textFilePath);
-        }
+        // Send complete event with warning if text failed
+        // Send complete event
+        sendEvent('complete', {
+            url: downloadUrl,
+            name: outputFilename
+        });
+
+        // Cleanup
+        try {
+            // req.file.path is the 'originalImagePath' we assigned to overlayImagePath
+            if (fs.existsSync(originalImagePath)) fs.unlinkSync(originalImagePath);
+        } catch (e) { console.error("Cleanup error:", e); }
+
+        res.end();
+
+    } catch (fatalError) {
+        console.error("❌ Fatal Error:", fatalError);
+        // Send the specific error message to help debugging
+        sendEvent('error', { error: 'Render failed completely. Details: ' + fatalError.message });
+        res.end();
+        if (fs.existsSync(textFilePath)) fs.unlinkSync(textFilePath);
+    }
 
 
 });
@@ -202,11 +202,11 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
 app.get('/download/:filename', (req, res) => {
     const filename = req.params.filename;
     const filePath = path.join(OUTPUT_DIR, filename);
-    
+
     if (!fs.existsSync(filePath)) {
         return res.status(404).json({ error: 'File not found' });
     }
-    
+
     res.download(filePath, filename, (err) => {
         if (err) {
             console.error('Download error:', err);
