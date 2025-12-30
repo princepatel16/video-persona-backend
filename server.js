@@ -62,7 +62,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
 
         const doctorName = req.body.doctorName || "Dr. Name";
         const originalImagePath = req.file.path;
-        const videoPath = path.join(__dirname, 'public', 'videos', 'Empagliflozin video.mp4');
+        const videoPath = path.join(__dirname, 'public', 'videos', 'empagliflozin_video.mp4');
 
         if (!fs.existsSync(videoPath)) {
             sendEvent('error', { error: "Base video not found." });
