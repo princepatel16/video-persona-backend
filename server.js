@@ -149,7 +149,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                         if (timeParts.length === 3) {
                             currentSeconds = (parseInt(timeParts[0]) || 0) * 3600 + (parseInt(timeParts[1]) || 0) * 60 + (parseFloat(timeParts[2]) || 0);
                         }
-                        const duration = 152;
+                        const duration = 90; // Updated to match 1:30 video length
                         const percent = Math.min((currentSeconds / duration) * 100, 100);
                         sendEvent('progress', { percent: Math.round(percent), status: 'Rendering...' });
                     })
