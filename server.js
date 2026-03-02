@@ -65,6 +65,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         const VIDEO_HEIGHT = isPortrait ? 1920 : 1080;
 
         let staticVideoSrc = req.body.staticVideoSrc;
+        const dynamicVideoSrc = req.body.dynamicVideoSrc;
         const gender = req.body.gender || 'Female';
 
         if (templateId === 'womens_day') {
