@@ -97,8 +97,9 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         console.log(`📍 Overlay At: ${imageX}px, ${imageY}px`);
 
         // 2. STAGE 1: Render Overlay on Dynamic Slide
+        const outputFilename = `${sanitizedName}_${requestId}.mp4`;
         const tempOverlayPath = path.join(TEMP_DIR, `overlay_${requestId}.mp4`); // Standard MP4
-        const finalOutputPath = path.join(OUTPUT_DIR, `${sanitizedName}_${requestId}.mp4`);
+        const finalOutputPath = path.join(OUTPUT_DIR, outputFilename);
 
         sendEvent('progress', { percent: 15, status: 'Adding overlay to dynamic segment...' });
 
