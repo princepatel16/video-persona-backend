@@ -188,9 +188,6 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
     }
 });
 
-
-});
-
 // Download endpoint - sends file and deletes it
 app.get('/download/:filename', (req, res) => {
     const filename = req.params.filename;
