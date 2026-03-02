@@ -99,26 +99,45 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                 ffmpeg(dynamicVideoPath)
                     .input(overlayImagePath)
                     .complexFilter([
+                        // Split overlay into two: Left (Photo) and Right (Text)
+                        // Photo is 388x388 in Women's Day template
                         {
-                            // Apply a fade-in effect to the overlay image with a 1s delay
-                            filter: 'fade',
-                            options: {
-                                type: 'in',
-                                start_time: 1, // 1 second delay to match preview
-                                duration: 0.5,
-                                alpha: 1
-                            },
+                            filter: 'crop',
+                            options: { w: 388, h: 388, x: 0, y: 0 },
                             inputs: '1:v',
-                            outputs: 'v_faded'
+                            outputs: 'v_photo'
+                        },
+                        {
+                            filter: 'crop',
+                            options: { w: 'iw-388', h: 388, x: 388, y: 0 },
+                            inputs: '1:v',
+                            outputs: 'v_text'
+                        },
+                        // Animation 1: Photo Pops/Fades at 1.0s
+                        {
+                            filter: 'fade',
+                            options: { type: 'in', start_time: 1.0, duration: 0.4, alpha: 1 },
+                            inputs: 'v_photo',
+                            outputs: 'v_photo_faded'
+                        },
+                        // Animation 2: Text Reveals at 1.6s
+                        {
+                            filter: 'fade',
+                            options: { type: 'in', start_time: 1.6, duration: 0.4, alpha: 1 },
+                            inputs: 'v_text',
+                            outputs: 'v_text_faded'
+                        },
+                        // Layering
+                        {
+                            filter: 'overlay',
+                            options: { x: imageX, y: imageY, enable: 'gte(t,1.0)' },
+                            inputs: ['0:v', 'v_photo_faded'],
+                            outputs: 'v_with_photo'
                         },
                         {
                             filter: 'overlay',
-                            options: {
-                                x: imageX,
-                                y: imageY,
-                                enable: 'gte(t,1)' // Only show after 1 second
-                            },
-                            inputs: ['0:v', 'v_faded'],
+                            options: { x: imageX + 388 - 90, y: imageY, enable: 'gte(t,1.6)' },
+                            inputs: ['v_with_photo', 'v_text_faded'],
                             outputs: 'v_out'
                         }
                     ])
