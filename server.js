@@ -99,26 +99,33 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                 ffmpeg(dynamicVideoPath)
                     .input(overlayImagePath)
                     .complexFilter([
-                        // Split overlay into two: Left (Photo) and Right (Text)
-                        // Photo is 388x388 in Women's Day template
+                        // Split overlay into two streams to allow separate processing
+                        {
+                            filter: 'split',
+                            options: 2,
+                            inputs: '1:v',
+                            outputs: ['v1', 'v2']
+                        },
+                        // Photo is 388x388 (Left part)
                         {
                             filter: 'crop',
                             options: { w: 388, h: 388, x: 0, y: 0 },
-                            inputs: '1:v',
+                            inputs: 'v1',
                             outputs: 'v_photo'
                         },
+                        // Banner text is the rest (Right part)
                         {
                             filter: 'crop',
                             options: { w: 700, h: 388, x: 298, y: 0 }, // x=298 (388-90 overlap)
-                            inputs: '1:v',
+                            inputs: 'v2',
                             outputs: 'v_text'
                         },
-                        // Animation 1: Photo "Pop" (Scale from 0 to 1) at 1.0s
+                        // Animation 1: Photo "Pop" (Scale from 0.01 to 1) at 1.0s
                         {
                             filter: 'scale',
                             options: {
-                                w: 'iw*min(1,max(0,(t-1)/0.3))',
-                                h: 'ih*min(1,max(0,(t-1)/0.3))',
+                                w: 'iw*max(0.01,min(1,(t-1)/0.3))',
+                                h: 'ih*max(0.01,min(1,(t-1)/0.3))',
                                 eval: 'frame'
                             },
                             inputs: 'v_photo',
@@ -131,12 +138,12 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                             inputs: 'v_text',
                             outputs: 'v_text_faded'
                         },
-                        // Layering: Overlay the photo (centered scaling)
+                        // Layering: Overlay the photo (centered scaling expression)
                         {
                             filter: 'overlay',
                             options: {
-                                x: `imageX + (388 - (388*min(1,max(0,(t-1)/0.3))))/2`,
-                                y: `imageY + (388 - (388*min(1,max(0,(t-1)/0.3))))/2`,
+                                x: `${imageX} + (388 - (388*max(0.01,min(1,(t-1)/0.3))))/2`,
+                                y: `${imageY} + (388 - (388*max(0.01,min(1,(t-1)/0.3))))/2`,
                                 enable: 'gte(t,1.0)'
                             },
                             inputs: ['0:v', 'v_photo_scaled'],
