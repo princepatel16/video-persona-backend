@@ -106,8 +106,9 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                         '-map [v_out]',
                         '-map 0:a?', // Map audio if exists
                         '-c:v libx264',
-                        '-preset fast',
-                        '-crf 23',
+                        '-preset ultrafast', // Use lowest CPU/Memory possible
+                        '-crf 30',           // Higher compression
+                        '-threads 1',        // Reduce memory overhead
                         '-pix_fmt yuv420p'
                     ])
                     .on('start', (cmd) => console.log('FFmpeg Overlay Start'))
@@ -147,8 +148,9 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                         '-map [v_final]',
                         '-map [a_final]',
                         '-c:v libx264',
-                        '-preset fast',
-                        '-crf 23',
+                        '-preset ultrafast', // Use lowest CPU/Memory possible
+                        '-crf 30',           // Higher compression
+                        '-threads 1',        // Reduce memory overhead
                         '-y'
                     ])
                     .on('progress', (p) => {
