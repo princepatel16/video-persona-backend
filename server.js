@@ -6,7 +6,6 @@ const ffmpegPath = require('ffmpeg-static');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 
 // Configure FFmpeg
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -39,7 +38,6 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no'); // Prevent proxy buffering (Railway/Nginx)
     res.flushHeaders();
 
     const sendEvent = (event, data) => {
@@ -93,15 +91,14 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         const doctorName = req.body.doctorName || 'Doctor';
         const sanitizedName = doctorName.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
         const requestId = Date.now();
+        const outputFilename = `${sanitizedName}-${requestId}.mp4`;
+        const finalOutputPath = path.join(OUTPUT_DIR, outputFilename);
+        const tempOverlayPath = path.join(TEMP_DIR, `overlay-${requestId}.mp4`);
 
         console.log(`🎬 Template: ${templateId}, Portrait: ${isPortrait}`);
         console.log(`📍 Overlay At: ${imageX}px, ${imageY}px`);
 
         // 2. STAGE 1: Render Overlay on Dynamic Slide
-        const outputFilename = `${sanitizedName}_${requestId}.mp4`;
-        const tempOverlayPath = path.join(TEMP_DIR, `overlay_${requestId}.mp4`); // Standard MP4
-        const finalOutputPath = path.join(OUTPUT_DIR, outputFilename);
-
         sendEvent('progress', { percent: 15, status: 'Adding overlay to dynamic segment...' });
 
         const renderOverlay = () => {
@@ -120,25 +117,15 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                         '-map [v_out]',
                         '-map 0:a?', // Map audio if exists
                         '-c:v libx264',
-                        '-profile:v main',   // Match intro profile
-                        '-level:v 4.1',      // Specific level for compatibility
-                        '-r 30',             // Match intro FPS
-                        '-pix_fmt yuv420p',  // Match intro pixel format
-                        '-color_primaries bt709',
-                        '-color_trc bt709',
-                        '-colorspace bt709',
-                        '-video_track_timescale 30000', // CRITICAL: Fixes 41s freeze
-                        '-c:a aac',
-                        '-ar 48000',
-                        '-ac 2',
-                        '-preset ultrafast',
-                        '-crf 26',
-                        '-x264-params "keyint=30:min-keyint=30:scenecut=0"', // CRITICAL: GOP alignment
-                        '-threads 1'
+                        '-preset ultrafast', // Use lowest CPU/Memory possible
+                        '-crf 30',           // Higher compression
+                        '-threads 1',        // Reduce memory overhead
+                        '-pix_fmt yuv420p'
                     ])
                     .on('start', (cmd) => console.log('FFmpeg Overlay Start'))
                     .on('progress', (p) => {
-                        const subPercent = 15 + (parseInt(p.percent) || 0) * 0.45;
+                        // Progress for this segment (roughly 15-50% of total)
+                        const subPercent = 15 + (parseInt(p.percent) || 0) * 0.35;
                         sendEvent('progress', { percent: Math.round(subPercent), status: 'Rendering personalized slide...' });
                     })
                     .on('end', resolve)
@@ -152,38 +139,39 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
 
         await renderOverlay();
 
+        // 3. STAGE 2: Concatenate with Static Intro (if needed)
         if (staticVideoPath && fs.existsSync(staticVideoPath)) {
-            sendEvent('progress', { percent: 70, status: 'Merging segments instantly...' });
+            sendEvent('progress', { percent: 60, status: 'Merging segments...' });
 
             await new Promise((resolve, reject) => {
-                const listFilePath = path.join(TEMP_DIR, `concat_${requestId}.txt`);
-                // FFmpeg concat demuxer needs forward slashes
-                const content = [
-                    `file '${staticVideoPath.replace(/\\/g, '/')}'`,
-                    `file '${tempOverlayPath.replace(/\\/g, '/')}'`
-                ].join('\n');
-
-                fs.writeFileSync(listFilePath, content);
-
-                ffmpeg()
-                    .input(listFilePath)
-                    .inputOptions(['-f concat', '-safe 0'])
+                // Using complex filter for concatenation - more robust for different durations
+                ffmpeg(staticVideoPath)
+                    .input(tempOverlayPath)
+                    .complexFilter([
+                        {
+                            filter: 'concat',
+                            options: { n: 2, v: 1, a: 1 },
+                            inputs: ['0:v', '0:a', '1:v', '1:a'],
+                            outputs: ['v_final', 'a_final']
+                        }
+                    ])
                     .outputOptions([
-                        '-c copy',
-                        '-movflags +faststart', // Web optimized
+                        '-map [v_final]',
+                        '-map [a_final]',
+                        '-c:v libx264',
+                        '-preset ultrafast', // Use lowest CPU/Memory possible
+                        '-crf 30',           // Higher compression
+                        '-threads 1',        // Reduce memory overhead
                         '-y'
                     ])
-                    .on('start', (cmd) => console.log('FFmpeg Concat Start (Stabilized)'))
-                    .on('end', () => {
-                        if (fs.existsSync(listFilePath)) fs.unlinkSync(listFilePath);
-                        if (fs.existsSync(tempOverlayPath)) fs.unlinkSync(tempOverlayPath);
-                        resolve();
+                    .on('progress', (p) => {
+                        const subPercent = 60 + (parseInt(p.percent) || 0) * 0.35;
+                        sendEvent('progress', { percent: Math.round(subPercent), status: 'Finalizing video merge...' });
                     })
+                    .on('end', resolve)
                     .on('error', (err) => {
-                        if (fs.existsSync(listFilePath)) fs.unlinkSync(listFilePath);
-                        if (fs.existsSync(tempOverlayPath)) fs.unlinkSync(tempOverlayPath);
-                        console.error('Merge Error:', err);
-                        reject(new Error(`Merge failed: ${err.message}`));
+                        console.error('Concat Error:', err);
+                        reject(new Error(`Concatenation failed: ${err.message}`));
                     })
                     .save(finalOutputPath);
             });
@@ -200,16 +188,11 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             console.error("Cleanup error:", e);
         }
 
-        const protocol = req.headers['x-forwarded-proto'] || (req.get('host').includes('localhost') ? 'http' : 'https');
+        const protocol = req.get('host').includes('localhost') ? 'http' : 'https';
         const downloadUrl = `${protocol}://${req.get('host')}/download/${outputFilename}`;
 
-        console.log(`✅ Video Generation Complete: ${outputFilename}`);
         sendEvent('complete', { url: downloadUrl, name: outputFilename });
-
-        // Give a small moment for the SSE buffer to clear before ending the response
-        setTimeout(() => {
-            if (!res.writableEnded) res.end();
-        }, 500);
+        res.end();
 
     } catch (fatalError) {
         console.error("❌ Fatal Error:", fatalError);
