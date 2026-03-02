@@ -107,21 +107,9 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                     .input(overlayImagePath)
                     .complexFilter([
                         {
-                            filter: 'format',
-                            options: { pix_fmts: 'rgba' },
-                            inputs: '1:v',
-                            outputs: 'faded_overlay'
-                        },
-                        {
-                            filter: 'fade',
-                            options: { t: 'in', st: 0, d: 1, alpha: 1 },
-                            inputs: 'faded_overlay',
-                            outputs: 'animated_overlay'
-                        },
-                        {
                             filter: 'overlay',
                             options: { x: imageX, y: imageY },
-                            inputs: ['0:v', 'animated_overlay'],
+                            inputs: ['0:v', '1:v'],
                             outputs: 'v_out'
                         }
                     ])
