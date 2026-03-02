@@ -117,10 +117,15 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                         '-map [v_out]',
                         '-map 0:a?', // Map audio if exists
                         '-c:v libx264',
+                        '-profile:v main',   // Match intro profile
+                        '-r 30',             // Match intro FPS
+                        '-pix_fmt yuv420p',  // Match intro pixel format
+                        '-c:a aac',          // Match intro audio codec
+                        '-ar 48000',         // Match intro sample rate
+                        '-ac 2',             // Match intro channels
                         '-preset ultrafast', // Use lowest CPU/Memory possible
-                        '-crf 30',           // Higher compression
-                        '-threads 1',        // Reduce memory overhead
-                        '-pix_fmt yuv420p'
+                        '-crf 28',           // Better quality/speed balance
+                        '-threads 0'         // Use all available threads for speed
                     ])
                     .on('start', (cmd) => console.log('FFmpeg Overlay Start'))
                     .on('progress', (p) => {
@@ -141,37 +146,33 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
 
         // 3. STAGE 2: Concatenate with Static Intro (if needed)
         if (staticVideoPath && fs.existsSync(staticVideoPath)) {
-            sendEvent('progress', { percent: 60, status: 'Merging segments...' });
+            sendEvent('progress', { percent: 60, status: 'Merging segments instantly...' });
+
+            const listFilePath = path.join(os.tmpdir(), `list_${Date.now()}.txt`);
+            const content = `file '${path.resolve(staticVideoPath).replace(/\\/g, '/')}'\nfile '${path.resolve(tempOverlayPath).replace(/\\/g, '/')}'`;
+            fs.writeFileSync(listFilePath, content);
 
             await new Promise((resolve, reject) => {
-                // Using complex filter for concatenation - more robust for different durations
-                ffmpeg(staticVideoPath)
-                    .input(tempOverlayPath)
-                    .complexFilter([
-                        {
-                            filter: 'concat',
-                            options: { n: 2, v: 1, a: 1 },
-                            inputs: ['0:v', '0:a', '1:v', '1:a'],
-                            outputs: ['v_final', 'a_final']
-                        }
-                    ])
+                ffmpeg()
+                    .input(listFilePath)
+                    .inputOptions(['-f concat', '-safe 0'])
                     .outputOptions([
-                        '-map [v_final]',
-                        '-map [a_final]',
-                        '-c:v libx264',
-                        '-preset ultrafast', // Use lowest CPU/Memory possible
-                        '-crf 30',           // Higher compression
-                        '-threads 1',        // Reduce memory overhead
-                        '-y'
+                        '-c copy',           // NO RE-ENCODING (Instant)
+                        '-movflags +faststart' // Progressive download
                     ])
+                    .on('start', (cmd) => console.log('FFmpeg Merge Start:', cmd))
                     .on('progress', (p) => {
                         const subPercent = 60 + (parseInt(p.percent) || 0) * 0.35;
-                        sendEvent('progress', { percent: Math.round(subPercent), status: 'Finalizing video merge...' });
+                        sendEvent('progress', { percent: Math.round(subPercent), status: 'Finalizing video...' });
                     })
-                    .on('end', resolve)
+                    .on('end', () => {
+                        try { fs.unlinkSync(listFilePath); } catch (e) { }
+                        resolve();
+                    })
                     .on('error', (err) => {
-                        console.error('Concat Error:', err);
-                        reject(new Error(`Concatenation failed: ${err.message}`));
+                        console.error('Merge Error:', err);
+                        try { fs.unlinkSync(listFilePath); } catch (e) { }
+                        reject(new Error(`Merge failed: ${err.message}`));
                     })
                     .save(finalOutputPath);
             });
