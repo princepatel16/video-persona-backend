@@ -81,8 +81,10 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         const imageX = Math.round(overlayX_Pct * VIDEO_WIDTH);
         const imageY = Math.round(overlayY_Pct * VIDEO_HEIGHT);
 
+        const doctorName = req.body.doctorName || 'Doctor';
+        const sanitizedName = doctorName.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
         const requestId = Date.now();
-        const outputFilename = `video-${requestId}.mp4`;
+        const outputFilename = `${sanitizedName}-${requestId}.mp4`;
         const finalOutputPath = path.join(OUTPUT_DIR, outputFilename);
         const tempOverlayPath = path.join(TEMP_DIR, `overlay-${requestId}.mp4`);
 
@@ -96,12 +98,30 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             return new Promise((resolve, reject) => {
                 ffmpeg(dynamicVideoPath)
                     .input(overlayImagePath)
-                    .complexFilter([{
-                        filter: 'overlay',
-                        options: { x: imageX, y: imageY },
-                        inputs: ['0:v', '1:v'],
-                        outputs: 'v_out'
-                    }])
+                    .complexFilter([
+                        {
+                            // Apply a fade-in effect to the overlay image with a 1s delay
+                            filter: 'fade',
+                            options: {
+                                type: 'in',
+                                start_time: 1, // 1 second delay to match preview
+                                duration: 0.5,
+                                alpha: 1
+                            },
+                            inputs: '1:v',
+                            outputs: 'v_faded'
+                        },
+                        {
+                            filter: 'overlay',
+                            options: {
+                                x: imageX,
+                                y: imageY,
+                                enable: 'gte(t,1)' // Only show after 1 second
+                            },
+                            inputs: ['0:v', 'v_faded'],
+                            outputs: 'v_out'
+                        }
+                    ])
                     .outputOptions([
                         '-map [v_out]',
                         '-map 0:a?', // Map audio if exists
