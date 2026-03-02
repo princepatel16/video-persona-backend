@@ -65,7 +65,13 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         const VIDEO_HEIGHT = isPortrait ? 1920 : 1080;
 
         let staticVideoSrc = req.body.staticVideoSrc;
-        let dynamicVideoSrc = req.body.dynamicVideoSrc || 'empagliflozin_video.mp4';
+        const gender = req.body.gender || 'Female';
+
+        if (templateId === 'womens_day') {
+            staticVideoSrc = gender === 'Male'
+                ? 'Woman day video static video Male.mp4'
+                : 'Woman day video static video Female.mp4';
+        }
 
         const dynamicVideoPath = path.join(__dirname, 'public', 'videos', dynamicVideoSrc);
         const staticVideoPath = staticVideoSrc ? path.join(__dirname, 'public', 'videos', staticVideoSrc) : null;
