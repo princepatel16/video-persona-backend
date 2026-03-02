@@ -125,7 +125,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                         '-ac 2',             // Match intro channels
                         '-preset ultrafast', // Use lowest CPU/Memory possible
                         '-crf 28',           // Better quality/speed balance
-                        '-threads 0'         // Use all available threads for speed
+                        '-threads 1'         // Capped to 1 thread to avoid OOM/SIGKILL on cloud servers
                     ])
                     .on('start', (cmd) => console.log('FFmpeg Overlay Start'))
                     .on('progress', (p) => {
