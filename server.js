@@ -39,6 +39,7 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Prevent proxy buffering (Railway/Nginx)
     res.flushHeaders();
 
     const sendEvent = (event, data) => {
@@ -199,11 +200,16 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             console.error("Cleanup error:", e);
         }
 
-        const protocol = req.get('host').includes('localhost') ? 'http' : 'https';
+        const protocol = req.headers['x-forwarded-proto'] || (req.get('host').includes('localhost') ? 'http' : 'https');
         const downloadUrl = `${protocol}://${req.get('host')}/download/${outputFilename}`;
 
+        console.log(`✅ Video Generation Complete: ${outputFilename}`);
         sendEvent('complete', { url: downloadUrl, name: outputFilename });
-        res.end();
+
+        // Give a small moment for the SSE buffer to clear before ending the response
+        setTimeout(() => {
+            if (!res.writableEnded) res.end();
+        }, 500);
 
     } catch (fatalError) {
         console.error("❌ Fatal Error:", fatalError);
