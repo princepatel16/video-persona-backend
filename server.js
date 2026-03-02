@@ -99,65 +99,10 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                 ffmpeg(dynamicVideoPath)
                     .input(overlayImagePath)
                     .complexFilter([
-                        // Split overlay into two streams to allow separate processing
-                        {
-                            filter: 'split',
-                            options: 2,
-                            inputs: '1:v',
-                            outputs: ['v1', 'v2']
-                        },
-                        // Photo is 388x388 (Left part)
-                        {
-                            filter: 'crop',
-                            options: { w: 388, h: 388, x: 0, y: 0 },
-                            inputs: 'v1',
-                            outputs: 'v_photo'
-                        },
-                        // Banner text is the rest (Right part)
-                        {
-                            filter: 'crop',
-                            options: { w: 700, h: 388, x: 298, y: 0 }, // x=298 (388-90 overlap)
-                            inputs: 'v2',
-                            outputs: 'v_text'
-                        },
-                        // Animation 1: Photo "Pop" (Scale from 0.01 to 1) at 1.0s
-                        {
-                            filter: 'scale',
-                            options: {
-                                w: 'iw*max(0.01,min(1,(t-1)/0.3))',
-                                h: 'ih*max(0.01,min(1,(t-1)/0.3))',
-                                eval: 'frame'
-                            },
-                            inputs: 'v_photo',
-                            outputs: 'v_photo_scaled'
-                        },
-                        // Animation 2: Text fades in at 1.6s
-                        {
-                            filter: 'fade',
-                            options: { type: 'in', start_time: 1.6, duration: 0.4, alpha: 1 },
-                            inputs: 'v_text',
-                            outputs: 'v_text_faded'
-                        },
-                        // Layering: Overlay the photo (centered scaling expression)
                         {
                             filter: 'overlay',
-                            options: {
-                                x: `${imageX} + (388 - (388*max(0.01,min(1,(t-1)/0.3))))/2`,
-                                y: `${imageY} + (388 - (388*max(0.01,min(1,(t-1)/0.3))))/2`,
-                                enable: 'gte(t,1.0)'
-                            },
-                            inputs: ['0:v', 'v_photo_scaled'],
-                            outputs: 'v_with_photo'
-                        },
-                        // Overlay the text banner
-                        {
-                            filter: 'overlay',
-                            options: {
-                                x: imageX + 298,
-                                y: imageY,
-                                enable: 'gte(t,1.6)'
-                            },
-                            inputs: ['v_with_photo', 'v_text_faded'],
+                            options: { x: imageX, y: imageY },
+                            inputs: ['0:v', '1:v'],
                             outputs: 'v_out'
                         }
                     ])
