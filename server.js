@@ -109,34 +109,47 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                         },
                         {
                             filter: 'crop',
-                            options: { w: 'iw-388', h: 388, x: 388, y: 0 },
+                            options: { w: 700, h: 388, x: 298, y: 0 }, // x=298 (388-90 overlap)
                             inputs: '1:v',
                             outputs: 'v_text'
                         },
-                        // Animation 1: Photo Pops/Fades at 1.0s
+                        // Animation 1: Photo "Pop" (Scale from 0 to 1) at 1.0s
                         {
-                            filter: 'fade',
-                            options: { type: 'in', start_time: 1.0, duration: 0.4, alpha: 1 },
+                            filter: 'scale',
+                            options: {
+                                w: 'iw*min(1,max(0,(t-1)/0.3))',
+                                h: 'ih*min(1,max(0,(t-1)/0.3))',
+                                eval: 'frame'
+                            },
                             inputs: 'v_photo',
-                            outputs: 'v_photo_faded'
+                            outputs: 'v_photo_scaled'
                         },
-                        // Animation 2: Text Reveals at 1.6s
+                        // Animation 2: Text fades in at 1.6s
                         {
                             filter: 'fade',
                             options: { type: 'in', start_time: 1.6, duration: 0.4, alpha: 1 },
                             inputs: 'v_text',
                             outputs: 'v_text_faded'
                         },
-                        // Layering
+                        // Layering: Overlay the photo (centered scaling)
                         {
                             filter: 'overlay',
-                            options: { x: imageX, y: imageY, enable: 'gte(t,1.0)' },
-                            inputs: ['0:v', 'v_photo_faded'],
+                            options: {
+                                x: `imageX + (388 - (388*min(1,max(0,(t-1)/0.3))))/2`,
+                                y: `imageY + (388 - (388*min(1,max(0,(t-1)/0.3))))/2`,
+                                enable: 'gte(t,1.0)'
+                            },
+                            inputs: ['0:v', 'v_photo_scaled'],
                             outputs: 'v_with_photo'
                         },
+                        // Overlay the text banner
                         {
                             filter: 'overlay',
-                            options: { x: imageX + 388 - 90, y: imageY, enable: 'gte(t,1.6)' },
+                            options: {
+                                x: imageX + 298,
+                                y: imageY,
+                                enable: 'gte(t,1.6)'
+                            },
                             inputs: ['v_with_photo', 'v_text_faded'],
                             outputs: 'v_out'
                         }
