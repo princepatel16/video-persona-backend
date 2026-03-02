@@ -6,6 +6,7 @@ const ffmpegPath = require('ffmpeg-static');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 // Configure FFmpeg
 ffmpeg.setFfmpegPath(ffmpegPath);
