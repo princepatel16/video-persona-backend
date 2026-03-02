@@ -119,19 +119,24 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                         '-map 0:a?', // Map audio if exists
                         '-c:v libx264',
                         '-profile:v main',   // Match intro profile
+                        '-level:v 4.1',      // Specific level for compatibility
                         '-r 30',             // Match intro FPS
                         '-pix_fmt yuv420p',  // Match intro pixel format
+                        '-color_primaries bt709',
+                        '-color_trc bt709',
+                        '-colorspace bt709',
+                        '-video_track_timescale 30000', // CRITICAL: Matches 30k tbn of intro
                         '-c:a aac',          // Match intro audio codec
                         '-ar 48000',         // Match intro sample rate
                         '-ac 2',             // Match intro channels
                         '-preset ultrafast', // Use lowest CPU/Memory possible
-                        '-crf 28',           // Better quality/speed balance
-                        '-threads 1'         // Capped to 1 thread to avoid OOM/SIGKILL on cloud servers
+                        '-crf 26',           // Slightly better quality
+                        '-x264-params "keyint=30:min-keyint=30:scenecut=0"', // Force consistent GOP
+                        '-threads 1'         // Capped to 1 thread for stability
                     ])
                     .on('start', (cmd) => console.log('FFmpeg Overlay Start'))
                     .on('progress', (p) => {
-                        // Progress for this segment (roughly 15-50% of total)
-                        const subPercent = 15 + (parseInt(p.percent) || 0) * 0.35;
+                        const subPercent = 15 + (parseInt(p.percent) || 0) * 0.40;
                         sendEvent('progress', { percent: Math.round(subPercent), status: 'Rendering personalized slide...' });
                     })
                     .on('end', resolve)
@@ -146,37 +151,29 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
         await renderOverlay();
 
         if (staticVideoPath && fs.existsSync(staticVideoPath)) {
-            sendEvent('progress', { percent: 60, status: 'Merging segments seamlessly...' });
+            sendEvent('progress', { percent: 70, status: 'Merging segments instantly...' });
 
             await new Promise((resolve, reject) => {
-                ffmpeg(staticVideoPath)
-                    .input(tempOverlayPath)
-                    .complexFilter([
-                        {
-                            filter: 'concat',
-                            options: { n: 2, v: 1, a: 1 },
-                            inputs: ['0:v', '0:a', '1:v', '1:a'],
-                            outputs: ['v_final', 'a_final']
-                        }
-                    ])
-                    .outputOptions([
-                        '-map [v_final]',
-                        '-map [a_final]',
-                        '-c:v libx264',
-                        '-preset ultrafast',
-                        '-crf 30',           // Slightly more compression for speed
-                        '-threads 1',        // Keep 1 thread for stability
-                        '-pix_fmt yuv420p',
-                        '-c:a aac',
-                        '-y'
-                    ])
-                    .on('start', (cmd) => console.log('FFmpeg Merge Start:', cmd))
-                    .on('progress', (p) => {
-                        const subPercent = 60 + (parseInt(p.percent) || 0) * 0.35;
-                        sendEvent('progress', { percent: Math.round(subPercent), status: 'Merging segments seamlessly...' });
+                const listFilePath = path.join(TEMP_DIR, `concat_${Date.now()}.txt`);
+                // FFmpeg concat demuxer needs forward slashes even on Windows
+                const content = [
+                    `file '${staticVideoPath.replace(/\\/g, '/')}'`,
+                    `file '${tempOverlayPath.replace(/\\/g, '/')}'`
+                ].join('\n');
+
+                fs.writeFileSync(listFilePath, content);
+
+                ffmpeg()
+                    .input(listFilePath)
+                    .inputOptions(['-f concat', '-safe 0'])
+                    .outputOptions(['-c copy']) // Instant merge
+                    .on('start', (cmd) => console.log('FFmpeg Merge Start (Speed)'))
+                    .on('end', () => {
+                        fs.unlinkSync(listFilePath);
+                        resolve();
                     })
-                    .on('end', resolve)
                     .on('error', (err) => {
+                        if (fs.existsSync(listFilePath)) fs.unlinkSync(listFilePath);
                         console.error('Merge Error:', err);
                         reject(new Error(`Merge failed: ${err.message}`));
                     })
