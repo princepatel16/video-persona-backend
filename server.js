@@ -145,34 +145,39 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
 
         await renderOverlay();
 
-        // 3. STAGE 2: Concatenate with Static Intro (if needed)
         if (staticVideoPath && fs.existsSync(staticVideoPath)) {
-            sendEvent('progress', { percent: 60, status: 'Merging segments instantly...' });
-
-            const listFilePath = path.join(os.tmpdir(), `list_${Date.now()}.txt`);
-            const content = `file '${path.resolve(staticVideoPath).replace(/\\/g, '/')}'\nfile '${path.resolve(tempOverlayPath).replace(/\\/g, '/')}'`;
-            fs.writeFileSync(listFilePath, content);
+            sendEvent('progress', { percent: 60, status: 'Merging segments seamlessly...' });
 
             await new Promise((resolve, reject) => {
-                ffmpeg()
-                    .input(listFilePath)
-                    .inputOptions(['-f concat', '-safe 0'])
+                ffmpeg(staticVideoPath)
+                    .input(tempOverlayPath)
+                    .complexFilter([
+                        {
+                            filter: 'concat',
+                            options: { n: 2, v: 1, a: 1 },
+                            inputs: ['0:v', '0:a', '1:v', '1:a'],
+                            outputs: ['v_final', 'a_final']
+                        }
+                    ])
                     .outputOptions([
-                        '-c copy',           // NO RE-ENCODING (Instant)
-                        '-movflags +faststart' // Progressive download
+                        '-map [v_final]',
+                        '-map [a_final]',
+                        '-c:v libx264',
+                        '-preset ultrafast',
+                        '-crf 30',           // Slightly more compression for speed
+                        '-threads 1',        // Keep 1 thread for stability
+                        '-pix_fmt yuv420p',
+                        '-c:a aac',
+                        '-y'
                     ])
                     .on('start', (cmd) => console.log('FFmpeg Merge Start:', cmd))
                     .on('progress', (p) => {
                         const subPercent = 60 + (parseInt(p.percent) || 0) * 0.35;
-                        sendEvent('progress', { percent: Math.round(subPercent), status: 'Finalizing video...' });
+                        sendEvent('progress', { percent: Math.round(subPercent), status: 'Merging segments seamlessly...' });
                     })
-                    .on('end', () => {
-                        try { fs.unlinkSync(listFilePath); } catch (e) { }
-                        resolve();
-                    })
+                    .on('end', resolve)
                     .on('error', (err) => {
                         console.error('Merge Error:', err);
-                        try { fs.unlinkSync(listFilePath); } catch (e) { }
                         reject(new Error(`Merge failed: ${err.message}`));
                     })
                     .save(finalOutputPath);
