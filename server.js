@@ -273,17 +273,27 @@ app.get('/download/:filename', (req, res) => {
         return res.status(404).json({ error: 'File not found' });
     }
 
-    res.download(filePath, filename, (err) => {
-        if (err) {
-            // If the user canceled the download or closed the connection, it's not a fatal server error
-            if (err.code === 'ECONNABORTED' || err.message === 'Request aborted') {
-                console.log(`⚠️ Download aborted by client: ${filename}`);
-            } else {
-                console.error('Download error:', err);
-            }
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'video/mp4');
+
+    const fileStream = fs.createReadStream(filePath);
+
+    fileStream.on('open', () => {
+        fileStream.pipe(res);
+    });
+
+    fileStream.on('error', (err) => {
+        console.error('File stream error:', err);
+        if (!res.headersSent) res.status(500).json({ error: 'Stream error' });
+    });
+
+    res.on('close', () => {
+        // Stop streaming if client disconnects
+        if (!fileStream.destroyed) {
+            fileStream.destroy();
         }
 
-        // Regardless of success or abortion, try to delete the temporary file to free space
+        // Always delete the temp file
         try {
             if (fs.existsSync(filePath)) {
                 fs.unlinkSync(filePath);
