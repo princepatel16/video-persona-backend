@@ -275,14 +275,22 @@ app.get('/download/:filename', (req, res) => {
 
     res.download(filePath, filename, (err) => {
         if (err) {
-            console.error('Download error:', err);
-        } else {
-            try {
+            // If the user canceled the download or closed the connection, it's not a fatal server error
+            if (err.code === 'ECONNABORTED' || err.message === 'Request aborted') {
+                console.log(`⚠️ Download aborted by client: ${filename}`);
+            } else {
+                console.error('Download error:', err);
+            }
+        }
+
+        // Regardless of success or abortion, try to delete the temporary file to free space
+        try {
+            if (fs.existsSync(filePath)) {
                 fs.unlinkSync(filePath);
                 console.log(`🗑️  Deleted temporary video: ${filename}`);
-            } catch (e) {
-                console.error('Delete error:', e);
             }
+        } catch (e) {
+            console.error('Delete error:', e);
         }
     });
 });
