@@ -204,8 +204,8 @@ app.post('/api/process-video-stream', upload.fields([
                         .input(tempOverlayPath)
                         .complexFilter([
                             // Resample audio to 48k/stereo and video to yuv420p to ensure compatibility
-                            '[0:v]format=yuv420p[v0]; [0:a]aresample=48000[a0];',
-                            '[1:v]format=yuv420p[v1]; [1:a]aresample=48000[a1];',
+                            '[0:v]format=yuv420p[v0]; [0:a]aresample=48000[a0]',
+                            '[1:v]format=yuv420p[v1]; [1:a]aresample=48000[a1]',
                             '[v0][a0][v1][a1]concat=n=2:v=1:a=1[v_final][a_final]'
                         ])
                         .outputOptions([
