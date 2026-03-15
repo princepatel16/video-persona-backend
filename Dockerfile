@@ -26,16 +26,15 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy package files and install dependencies
-COPY package*.json ./
-RUN npm install
-
-# Copy the rest of the application code
+# Copy everything first (except things in .dockerignore)
 COPY . .
+
+# Install dependencies (only Linux ones will be present because node_modules is ignored)
+RUN npm install
 
 # IMPORTANT: Download and bake the Remotion browser into the image during the build phase
 # This prevents runtime downloads and high memory usage during generation
-RUN ./node_modules/.bin/remotion browser ensure --yes
+RUN npx remotion browser ensure --yes
 
 # Expose the application port (Railway usually provides PORT env var)
 EXPOSE 8080
