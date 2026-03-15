@@ -196,53 +196,59 @@ app.post('/api/process-video-stream', upload.fields([
 
             // 3. STAGE 2: Concatenate with Static Intro (if needed)
             if (staticVideoPath && fs.existsSync(staticVideoPath)) {
-                sendEvent('progress', { percent: 60, status: 'Merging segments...' });
+                sendEvent('progress', { percent: 60, status: 'Preparing final merge...' });
 
-                await new Promise((resolve, reject) => {
-                    // Using complex filter with resampling for maximum compatibility
-                    ffmpeg(staticVideoPath)
-                        .input(tempOverlayPath)
-                        .complexFilter([
-                            // Resample audio to 48k/stereo and video to yuv420p to ensure compatibility
-                            '[0:v]format=yuv420p[v0]; [0:a]aresample=48000[a0]',
-                            '[1:v]format=yuv420p[v1]; [1:a]aresample=48000[a1]',
-                            '[v0][a0][v1][a1]concat=n=2:v=1:a=1[v_final][a_final]'
-                        ])
-                        .outputOptions([
-                            '-map [v_final]',
-                            '-map [a_final]',
-                            '-c:v libx264',
-                            '-c:a aac',
-                            '-b:a 192k',
-                            '-preset ultrafast',
-                            '-crf 28',           // Slightly better quality than 30
-                            '-threads 1',        // Safety for Railway OOM
-                            '-y'
-                        ])
-                        .on('start', (cmd) => {
-                            console.log('FFmpeg Concat Command:', cmd);
-                        })
-                        .on('progress', (p) => {
-                            // Ensure percentage doesn't get stuck at weird values
-                            const rawPercent = Math.min(100, Math.max(0, parseInt(p.percent) || 0));
-                            const subPercent = 60 + (rawPercent * 0.38); // 60% -> 98%
-                            sendEvent('progress', { 
-                                percent: Math.round(subPercent), 
-                                status: `Finalizing video merge... ${rawPercent}%` 
-                            });
-                        })
-                        .on('end', () => {
-                            console.log('✅ Final merge complete');
-                            resolve();
-                        })
-                        .on('error', (err) => {
-                            console.error('❌ Concat Error:', err);
-                            reject(new Error(`Concatenation failed: ${err.message}`));
-                        })
-                        .save(finalOutputPath);
-                });
+                const tempTS1 = path.join(TEMP_DIR, `seg1-${requestId}.ts`);
+                const tempTS2 = path.join(TEMP_DIR, `seg2-${requestId}.ts`);
+
+                const transcodeToTS = (input, output, currentPercent, weight) => {
+                    return new Promise((resolve, reject) => {
+                        ffmpeg(input)
+                            .outputOptions([
+                                '-c:v libx264',
+                                '-preset superfast',
+                                '-pix_fmt yuv420p',
+                                '-s 1080x1920',
+                                '-r 30',
+                                '-c:a aac',
+                                '-ar 48000',
+                                '-ac 2',
+                                '-f mpegts'
+                            ])
+                            .on('progress', (p) => {
+                                const sub = currentPercent + (Math.min(100, Math.max(0, p.percent || 0)) * weight);
+                                sendEvent('progress', { percent: Math.round(sub), status: 'Processing video segments...' });
+                            })
+                            .on('error', reject)
+                            .on('end', resolve)
+                            .save(output);
+                    });
+                };
+
+                try {
+                    // Transcode Intro
+                    await transcodeToTS(staticVideoPath, tempTS1, 60, 0.15);
+                    // Transcode Overlay
+                    await transcodeToTS(tempOverlayPath, tempTS2, 75, 0.15);
+
+                    sendEvent('progress', { percent: 90, status: 'Finalizing movie...' });
+
+                    // Final Concat
+                    await new Promise((resolve, reject) => {
+                        ffmpeg(`concat:${tempTS1}|${tempTS2}`)
+                            .outputOptions(['-c copy', '-movflags +faststart'])
+                            .on('error', reject)
+                            .on('end', resolve)
+                            .save(finalOutputPath);
+                    });
+
+                    // Cleanup TS
+                    [tempTS1, tempTS2].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
+                } catch (err) {
+                    console.error('❌ Merge Error:', err);
+                    throw new Error(`Merge failed: ${err.message}`);
+                }
             } else {
-                // No intro, just move the overlay result to output
                 fs.renameSync(tempOverlayPath, finalOutputPath);
             }
 

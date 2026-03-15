@@ -46,6 +46,7 @@ async function renderLastSlide({ doctorName, photoUrl, nameImageUrl, theme, imag
         composition,
         serveUrl: bundledData,
         codec: 'h264',
+        audioCodec: 'aac',
         outputLocation: outputPath,
         inputProps: {
             doctorName,
