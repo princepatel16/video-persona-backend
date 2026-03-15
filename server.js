@@ -202,14 +202,19 @@ app.post('/api/process-video-stream', upload.fields([
                             '-c:v libx264',
                             '-preset superfast',
                             '-pix_fmt yuv420p',
+                            '-profile:v main', // Match intro's profile
                             '-vf scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2',
                             '-r 30',
+                            '-video_track_timescale 30000', // Match intro's tbn
                             '-c:a aac',
                             '-ar 48000',
                             '-ac 2',
                             '-threads 1'
                         ])
-                        .on('error', reject)
+                        .on('error', (err) => {
+                            console.error('Normalization error:', err);
+                            reject(err);
+                        })
                         .on('end', resolve)
                         .save(normOverlayPath);
                 });
@@ -221,13 +226,18 @@ app.post('/api/process-video-stream', upload.fields([
                 fs.writeFileSync(listPath, listContent);
 
                 await new Promise((resolve, reject) => {
-                    ffmpeg()
+                    const joiner = ffmpeg()
                         .input(listPath)
                         .inputOptions(['-f concat', '-safe 0'])
-                        .outputOptions(['-c copy', '-movflags +faststart'])
-                        .on('error', reject)
-                        .on('end', resolve)
-                        .save(finalOutputPath);
+                        .outputOptions(['-c copy', '-movflags +faststart']);
+                    
+                    joiner.on('start', (cmd) => console.log('Final Join Command:', cmd));
+                    joiner.on('error', (err) => {
+                        console.error('Final Join error:', err);
+                        reject(err);
+                    });
+                    joiner.on('end', resolve);
+                    joiner.save(finalOutputPath);
                 });
 
                 // Cleanup intermediate files

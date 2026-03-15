@@ -47,7 +47,7 @@ export const LastSlide: React.FC<LastSlideProps> = ({
                 <Video 
                     src={staticFile(backgroundVideoPath)} 
                     style={{ position: 'absolute', width: '100%', height: '100%', objectFit: 'cover' }}
-                    muted={true}
+                    muted={false}
                     volume={0}
                 />
             )}
