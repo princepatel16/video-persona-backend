@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "setup-browser": "remotion browser ensure"
   },
   "dependencies": {
     "@remotion/bundler": "^4.0.435",
