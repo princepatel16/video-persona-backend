@@ -149,8 +149,6 @@ app.post('/api/process-video-stream', upload.fields([
             const requestId = Date.now();
             const outputFilename = `${sanitizedName}-${requestId}.mp4`;
             const finalOutputPath = path.join(OUTPUT_DIR, outputFilename);
-            const tempOverlayPath = path.join(TEMP_DIR, `overlay-${requestId}.mp4`);
-
             // 2. STAGE 1: Render Animated Overlay on Dynamic Slide using Remotion
             sendEvent('progress', { percent: 15, status: 'Generating animated slide with Remotion...' });
 
@@ -174,14 +172,14 @@ app.post('/api/process-video-stream', upload.fields([
                  tempAssets.push(dest);
             }
 
-            const relativeIntroPath = `videos/${staticVideoSrc}`;
-            const relativeVideoPath = `videos/${path.basename(dynamicVideoPath)}`;
+            const tempOverlayPath = path.join(TEMP_DIR, `overlay-5s-${requestId}.mp4`);
+            const normOverlayPath = path.join(TEMP_DIR, `norm-overlay-${requestId}.mp4`);
+            const listPath = path.join(TEMP_DIR, `list-${requestId}.txt`);
 
-            // 2. STAGE 1: Render Full Unified Video (Intro + Slide) using Remotion
-            sendEvent('progress', { percent: 15, status: 'Generating full video with Remotion...' });
+            // 2. STAGE 1: Render 5s Animated Slide using Remotion (Fast)
+            sendEvent('progress', { percent: 15, status: 'Generating 5s animated slide...' });
 
             await renderLastSlide({
-                introVideoPath: relativeIntroPath,
                 doctorName,
                 photoUrl,
                 nameImageUrl,
@@ -189,15 +187,57 @@ app.post('/api/process-video-stream', upload.fields([
                 imageX,
                 imageY,
                 backgroundVideoPath: relativeVideoPath,
-                outputPath: finalOutputPath // Render directly to final output
+                outputPath: tempOverlayPath
             });
 
-            // 3. Cleanup and Respond
-            try {
-                // Cleanup photo/name temporary assets in public/output
-                tempAssets.forEach(f => {
-                    if (fs.existsSync(f)) fs.unlinkSync(f);
+            // 3. STAGE 2: Lightweight Merge
+            if (staticVideoPath && fs.existsSync(staticVideoPath)) {
+                sendEvent('progress', { percent: 70, status: 'Normalizing slide for merge...' });
+
+                // Normalize ONLY the 5s overlay to match the into (Fast)
+                await new Promise((resolve, reject) => {
+                    ffmpeg(tempOverlayPath)
+                        .outputOptions([
+                            '-c:v libx264',
+                            '-preset superfast',
+                            '-pix_fmt yuv420p',
+                            '-vf scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2',
+                            '-r 30',
+                            '-c:a aac',
+                            '-ar 48000',
+                            '-ac 2',
+                            '-threads 1'
+                        ])
+                        .on('error', reject)
+                        .on('end', resolve)
+                        .save(normOverlayPath);
                 });
+
+                sendEvent('progress', { percent: 90, status: 'Joining segments (Fast)...' });
+
+                // Concat Intro + Normalized 5s Slide
+                const listContent = `file '${staticVideoPath.replace(/\\/g, '/')}'\nfile '${normOverlayPath.replace(/\\/g, '/')}'`;
+                fs.writeFileSync(listPath, listContent);
+
+                await new Promise((resolve, reject) => {
+                    ffmpeg()
+                        .input(listPath)
+                        .inputOptions(['-f concat', '-safe 0'])
+                        .outputOptions(['-c copy', '-movflags +faststart'])
+                        .on('error', reject)
+                        .on('end', resolve)
+                        .save(finalOutputPath);
+                });
+
+                // Cleanup intermediate files
+                [tempOverlayPath, normOverlayPath, listPath].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
+            } else {
+                fs.renameSync(tempOverlayPath, finalOutputPath);
+            }
+
+            // 4. Final Cleanup and Respond
+            try {
+                tempAssets.forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
             } catch (e) {
                 console.error("Cleanup error:", e);
             }
