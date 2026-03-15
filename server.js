@@ -100,19 +100,38 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             return;
         }
 
-        try {
-            console.log("🚀 Starting Dynamic Video Generation...");
-            sendEvent('progress', { percent: 5, status: 'Processing started...' });
+        // 1. Multi-file upload for separate photo and name images
+        upload.fields([
+            { name: 'doctorImage', maxCount: 1 },
+            { name: 'doctorNameImage', maxCount: 1 }
+        ])(req, res, async (err) => {
+            if (err) {
+                console.error("Upload error:", err);
+                return res.status(500).json({ error: 'File upload failed: ' + err.message });
+            }
 
-            // 1. Extract and Validate Parameters
+            // Extract files
+            const doctorImageFile = req.files && req.files['doctorImage'] ? req.files['doctorImage'][0] : null;
+            const nameImageFile = req.files && req.files['doctorNameImage'] ? req.files['doctorNameImage'][0] : null;
+
+            if (!doctorImageFile) {
+                return res.status(400).json({ error: 'Doctor photo is required' });
+            }
+
+            // Extract parameters
             const isPortrait = req.body.isPortrait === 'true';
             const templateId = req.body.templateId || 'default';
             const VIDEO_WIDTH = isPortrait ? 1080 : 1920;
             const VIDEO_HEIGHT = isPortrait ? 1920 : 1080;
+            const gender = req.body.gender || 'Female';
+            const overlayX_Pct = parseFloat(req.body.overlayX) || 0;
+            const overlayY_Pct = parseFloat(req.body.overlayY) || 0;
+            const imageX = Math.round(overlayX_Pct * VIDEO_WIDTH);
+            const imageY = Math.round(overlayY_Pct * VIDEO_HEIGHT);
+            const doctorName = req.body.doctorName || 'Doctor';
 
             let staticVideoSrc = req.body.staticVideoSrc;
             const dynamicVideoSrc = req.body.dynamicVideoSrc;
-            const gender = req.body.gender || 'Female';
 
             if (templateId === 'womens_day') {
                 staticVideoSrc = gender === 'Male'
@@ -122,19 +141,11 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
 
             const dynamicVideoPath = path.join(__dirname, 'public', 'videos', dynamicVideoSrc);
             const staticVideoPath = staticVideoSrc ? path.join(__dirname, 'public', 'videos', staticVideoSrc) : null;
-
+            
             if (!fs.existsSync(dynamicVideoPath)) {
-                throw new Error(`Dynamic video segment not found: ${dynamicVideoSrc}`);
+                return res.status(400).json({ error: `Dynamic video segment not found: ${dynamicVideoSrc}` });
             }
 
-            const overlayImagePath = req.file.path;
-            const overlayX_Pct = parseFloat(req.body.overlayX) || 0;
-            const overlayY_Pct = parseFloat(req.body.overlayY) || 0;
-
-            const imageX = Math.round(overlayX_Pct * VIDEO_WIDTH);
-            const imageY = Math.round(overlayY_Pct * VIDEO_HEIGHT);
-
-            const doctorName = req.body.doctorName || 'Doctor';
             const sanitizedName = doctorName.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
             const requestId = Date.now();
             const outputFilename = `${sanitizedName}-${requestId}.mp4`;
@@ -144,25 +155,34 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             // 2. STAGE 1: Render Animated Overlay on Dynamic Slide using Remotion
             sendEvent('progress', { percent: 15, status: 'Generating animated slide with Remotion...' });
 
-            // We use paths relative to the 'public' folder for staticFile resolution in Remotion
+            const tempAssets = [];
             let photoUrl = ""; 
-            let tempPhotoDest = null;
-            if (req.file) {
-                 const photoFilename = `remotion-${Date.now()}-${path.basename(req.file.path)}`;
-                 tempPhotoDest = path.join(OUTPUT_DIR, photoFilename);
-                 fs.copyFileSync(req.file.path, tempPhotoDest);
-                 // Path relative to the 'public' root
+            let nameImageUrl = "";
+
+            if (doctorImageFile) {
+                 const photoFilename = `photo-${Date.now()}-${path.basename(doctorImageFile.path)}`;
+                 const dest = path.join(OUTPUT_DIR, photoFilename);
+                 fs.copyFileSync(doctorImageFile.path, dest);
                  photoUrl = `output/${photoFilename}`;
+                 tempAssets.push(dest);
             }
 
-            // Path relative to the 'public' root
+            if (nameImageFile) {
+                 const nameFilename = `name-${Date.now()}-${path.basename(nameImageFile.path)}`;
+                 const dest = path.join(OUTPUT_DIR, nameFilename);
+                 fs.copyFileSync(nameImageFile.path, dest);
+                 nameImageUrl = `output/${nameFilename}`;
+                 tempAssets.push(dest);
+            }
+
             const relativeVideoPath = `videos/${path.basename(dynamicVideoPath)}`;
 
-            console.log("Remotion Args (Relative):", { doctorName, photoUrl, imageX, imageY, relativeVideoPath });
+            console.log("Remotion Args (Multi-Asset):", { doctorName, photoUrl, nameImageUrl, imageX, imageY, relativeVideoPath });
 
             await renderLastSlide({
                 doctorName,
                 photoUrl,
+                nameImageUrl,
                 theme: templateId || 'womens_day',
                 imageX,
                 imageY,
@@ -170,10 +190,10 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
                 outputPath: tempOverlayPath
             });
 
-            // Cleanup the temp public photo after Remotion renders it
-            if (tempPhotoDest && fs.existsSync(tempPhotoDest)) {
-                fs.unlinkSync(tempPhotoDest);
-            }
+            // Cleanup local copies in public/
+            tempAssets.forEach(f => {
+                if (fs.existsSync(f)) fs.unlinkSync(f);
+            });
 
             // 3. STAGE 2: Concatenate with Static Intro (if needed)
             if (staticVideoPath && fs.existsSync(staticVideoPath)) {

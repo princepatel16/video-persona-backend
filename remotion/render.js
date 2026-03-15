@@ -31,6 +31,7 @@ async function renderLastSlide({ doctorName, photoUrl, theme, imageX, imageY, ba
             inputProps: {
                 doctorName,
                 photoUrl,
+                nameImageUrl,
                 theme,
                 imageX,
                 imageY,

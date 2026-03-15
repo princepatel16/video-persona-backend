@@ -5,6 +5,7 @@ import { z } from 'zod';
 export const lastSlideSchema = z.object({
     doctorName: z.string(),
     photoUrl: z.string(),
+    nameImageUrl: z.string().optional(),
     theme: z.string(),
     imageX: z.number(),
     imageY: z.number(),
@@ -13,21 +14,27 @@ export const lastSlideSchema = z.object({
 
 type LastSlideProps = z.infer<typeof lastSlideSchema>;
 
-export const LastSlide: React.FC<LastSlideProps> = ({ doctorName, photoUrl, theme, imageX, imageY, backgroundVideoPath }) => {
+export const LastSlide: React.FC<LastSlideProps> = ({ 
+    doctorName, 
+    photoUrl, 
+    nameImageUrl, 
+    theme, 
+    imageX, 
+    imageY, 
+    backgroundVideoPath 
+}) => {
     const frame = useCurrentFrame();
     const { fps } = useVideoConfig();
 
-    // Animate photo scaling in
-    const scale = spring({
+    // 1. Pop-up animation for photo
+    const photoScale = spring({
         fps,
         frame,
-        config: {
-            damping: 12,
-        },
+        config: { damping: 12 },
     });
 
-    // Fade in text
-    const opacity = interpolate(frame, [15, 30], [0, 1], {
+    // 2. Fade-in animation for name text (starts slightly later)
+    const textOpacity = interpolate(frame, [20, 40], [0, 1], {
         extrapolateLeft: 'clamp',
         extrapolateRight: 'clamp',
     });
@@ -36,7 +43,6 @@ export const LastSlide: React.FC<LastSlideProps> = ({ doctorName, photoUrl, them
 
     return (
         <AbsoluteFill style={{ backgroundColor }}>
-            {/* Render the background video directly via staticFile if provided from Node */}
             {backgroundVideoPath && (
                 <Video 
                     src={staticFile(backgroundVideoPath)} 
@@ -44,26 +50,26 @@ export const LastSlide: React.FC<LastSlideProps> = ({ doctorName, photoUrl, them
                 />
             )}
             
-            {/* The exact X / Y position passed from the frontend (top-left of the composite group) */}
-            <div 
-                style={{ 
-                    position: 'absolute', 
-                    left: `${imageX}px`, 
-                    top: `${imageY}px`,
-                    transform: `scale(${scale})`,
-                    opacity, // Let the group fade in slightly as well
-                    display: 'flex',
-                    alignItems: 'center',
-                }}
-            >
-                <Img
-                    src={staticFile(photoUrl)}
-                    style={{
-                        // We don't set a fixed width/height here because the PNG is already correctly sized from the frontend canvas
-                        maxWidth: '100%',
-                    }}
-                    onError={(e) => console.error("Overlay Load Error:", photoUrl)}
-                />
+            <div style={{ position: 'absolute', left: `${imageX}px`, top: `${imageY}px`, display: 'flex', alignItems: 'center' }}>
+                {/* 1. Photo (Animated with Scale) */}
+                <div style={{ transform: `scale(${photoScale})` }}>
+                    <Img
+                        src={staticFile(photoUrl)}
+                        style={{ maxWidth: '100%' }}
+                        onError={(e) => console.error("Photo Load Error:", photoUrl)}
+                    />
+                </div>
+
+                {/* 2. Text (Animated with Fade) */}
+                {nameImageUrl && (
+                    <div style={{ opacity: textOpacity, marginLeft: '-40px' }}>
+                        <Img
+                            src={staticFile(nameImageUrl)}
+                            style={{ maxWidth: '100%' }}
+                            onError={(e) => console.error("Name Image Load Error:", nameImageUrl)}
+                        />
+                    </div>
+                )}
             </div>
         </AbsoluteFill>
     );
