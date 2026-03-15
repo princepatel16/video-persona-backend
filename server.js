@@ -144,24 +144,29 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             // 2. STAGE 1: Render Animated Overlay on Dynamic Slide using Remotion
             sendEvent('progress', { percent: 15, status: 'Generating animated slide with Remotion...' });
 
-            // We temporarily move the uploaded file into the public temp dir so Remotion's puppeteer can access it via HTTP
-            let photoUrl = overlayImagePath; // Fallback to local path if no file (shouldn't happen since multer enforces it)
+            // We use paths relative to the 'public' folder for staticFile resolution in Remotion
+            let photoUrl = ""; 
             let tempPhotoDest = null;
             if (req.file) {
-                 tempPhotoDest = path.join(OUTPUT_DIR, path.basename(req.file.path));
+                 const photoFilename = `remotion-${Date.now()}-${path.basename(req.file.path)}`;
+                 tempPhotoDest = path.join(OUTPUT_DIR, photoFilename);
                  fs.copyFileSync(req.file.path, tempPhotoDest);
-                 photoUrl = `http://localhost:${process.env.PORT || 3001}/output/${path.basename(req.file.path)}`;
+                 // Path relative to the 'public' root
+                 photoUrl = `output/${photoFilename}`;
             }
 
-            console.log("Remotion Args:", { doctorName, photoUrl, imageX, imageY, dynamicVideoPath });
+            // Path relative to the 'public' root
+            const relativeVideoPath = `videos/${path.basename(dynamicVideoPath)}`;
+
+            console.log("Remotion Args (Relative):", { doctorName, photoUrl, imageX, imageY, relativeVideoPath });
 
             await renderLastSlide({
                 doctorName,
                 photoUrl,
-                theme: templateId,
+                theme: templateId || 'womens_day',
                 imageX,
                 imageY,
-                backgroundVideoPath: dynamicVideoPath,
+                backgroundVideoPath: relativeVideoPath,
                 outputPath: tempOverlayPath
             });
 

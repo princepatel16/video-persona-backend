@@ -18,25 +18,26 @@ async function renderLastSlide({ doctorName, photoUrl, theme, imageX, imageY, ba
 
     try {
         console.log('Step 1: Starting Remotion Bundling...');
-    const bundledData = await bundle({
-        entryPoint: path.resolve(__dirname, 'Root.tsx'),
-        // Optional: specify caching and other webpack options
-    });
+        const bundledData = await bundle({
+            entryPoint: path.resolve(__dirname, 'Root.tsx'),
+            publicDir: path.resolve(__dirname, '..', 'public'), // Point to the global public folder
+        });
 
-    console.log('Selecting Composition...');
-    // Extract the composition to render
-    const composition = await selectComposition({
-        serveUrl: bundledData,
-        id: 'LastSlide',
-        inputProps: {
-            doctorName,
-            photoUrl,
-            theme,
-            imageX,
-            imageY,
-            backgroundVideoPath,
-        },
-    });
+        console.log('Step 2: Selecting Composition...');
+        // Extract the composition to render
+        const composition = await selectComposition({
+            serveUrl: bundledData,
+            id: 'LastSlide',
+            inputProps: {
+                doctorName,
+                photoUrl,
+                theme,
+                imageX,
+                imageY,
+                backgroundVideoPath,
+            },
+            browserLaunchTimeout: 60000, // Increase timeout for Railway
+        });
 
     console.log('Step 3: Rendering Media...', outputPath);
     // Render to MP4

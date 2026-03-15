@@ -59,7 +59,7 @@ export const LastSlide: React.FC<LastSlideProps> = ({ doctorName, photoUrl, them
             >
                 <div style={{ transform: `scale(${scale})`, marginBottom: '20px' }}>
                     <Img
-                        src={photoUrl}
+                        src={staticFile(photoUrl)}
                         style={{
                             width: '400px', // Matches your frontend circle size roughly, adjust if needed
                             height: '400px',
