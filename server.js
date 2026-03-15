@@ -140,6 +140,7 @@ app.post('/api/process-video-stream', upload.fields([
 
             const dynamicVideoPath = path.join(__dirname, 'public', 'videos', dynamicVideoSrc);
             const staticVideoPath = staticVideoSrc ? path.join(__dirname, 'public', 'videos', staticVideoSrc) : null;
+            const relativeVideoPath = `videos/${dynamicVideoSrc}`;
             
             if (!fs.existsSync(dynamicVideoPath)) {
                 return res.status(400).json({ error: `Dynamic video segment not found: ${dynamicVideoSrc}` });
