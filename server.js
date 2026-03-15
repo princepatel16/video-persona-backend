@@ -198,52 +198,65 @@ app.post('/api/process-video-stream', upload.fields([
             if (staticVideoPath && fs.existsSync(staticVideoPath)) {
                 sendEvent('progress', { percent: 60, status: 'Preparing final merge...' });
 
-                const tempTS1 = path.join(TEMP_DIR, `seg1-${requestId}.ts`);
-                const tempTS2 = path.join(TEMP_DIR, `seg2-${requestId}.ts`);
+                const norm1 = path.join(TEMP_DIR, `norm1-${requestId}.mp4`);
+                const norm2 = path.join(TEMP_DIR, `norm2-${requestId}.mp4`);
+                const listPath = path.join(TEMP_DIR, `list-${requestId}.txt`);
 
-                const transcodeToTS = (input, output, currentPercent, weight) => {
+                const normalizeToMP4 = (input, output, currentPercent, weight) => {
                     return new Promise((resolve, reject) => {
                         ffmpeg(input)
                             .outputOptions([
                                 '-c:v libx264',
                                 '-preset superfast',
                                 '-pix_fmt yuv420p',
-                                '-s 1080x1920',
+                                '-vf scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2',
                                 '-r 30',
                                 '-c:a aac',
                                 '-ar 48000',
                                 '-ac 2',
-                                '-f mpegts'
+                                '-threads 1' // Memory safety
                             ])
                             .on('progress', (p) => {
                                 const sub = currentPercent + (Math.min(100, Math.max(0, p.percent || 0)) * weight);
-                                sendEvent('progress', { percent: Math.round(sub), status: 'Processing video segments...' });
+                                sendEvent('progress', { percent: Math.round(sub), status: 'Optimizing segments...' });
                             })
-                            .on('error', reject)
+                            .on('error', (err) => {
+                                console.error('Normalization error:', err);
+                                reject(err);
+                            })
                             .on('end', resolve)
                             .save(output);
                     });
                 };
 
                 try {
-                    // Transcode Intro
-                    await transcodeToTS(staticVideoPath, tempTS1, 60, 0.15);
-                    // Transcode Overlay
-                    await transcodeToTS(tempOverlayPath, tempTS2, 75, 0.15);
+                    // 1. Normalize Intro (Sequential to save memory)
+                    await normalizeToMP4(staticVideoPath, norm1, 60, 0.15);
+                    // 2. Normalize Overlay
+                    await normalizeToMP4(tempOverlayPath, norm2, 75, 0.15);
 
-                    sendEvent('progress', { percent: 90, status: 'Finalizing movie...' });
+                    // 3. Create Concat List file
+                    const listContent = `file '${norm1.replace(/\\/g, '/')}'\nfile '${norm2.replace(/\\/g, '/')}'`;
+                    fs.writeFileSync(listPath, listContent);
 
-                    // Final Concat
+                    sendEvent('progress', { percent: 90, status: 'Joining final segments...' });
+
+                    // 4. Final Join (Ultra fast, no re-encoding)
                     await new Promise((resolve, reject) => {
-                        ffmpeg(`concat:${tempTS1}|${tempTS2}`)
+                        ffmpeg()
+                            .input(listPath)
+                            .inputOptions(['-f concat', '-safe 0'])
                             .outputOptions(['-c copy', '-movflags +faststart'])
-                            .on('error', reject)
+                            .on('error', (err) => {
+                                console.error('Concat error:', err);
+                                reject(err);
+                            })
                             .on('end', resolve)
                             .save(finalOutputPath);
                     });
 
-                    // Cleanup TS
-                    [tempTS1, tempTS2].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
+                    // Cleanup intermediate files
+                    [norm1, norm2, listPath].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
                 } catch (err) {
                     console.error('❌ Merge Error:', err);
                     throw new Error(`Merge failed: ${err.message}`);
