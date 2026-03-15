@@ -26,23 +26,20 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy package files first for better caching
+# Copy package files first
 COPY package*.json ./
 
-# Install dependencies
+# Install ALL dependencies including dev (for typescript/remotion bundling)
 RUN npm install
 
 # Copy the rest of the application code
 COPY . .
 
-# Debug: verify remotion binary exists
-RUN ls -la node_modules/.bin/remotion
-
 # IMPORTANT: Download and bake the Remotion browser into the image during the build phase
-# This prevents runtime downloads and high memory usage during generation
+# We use npm exec or the direct local script to ensure it finds the binary
 RUN npm run setup-browser -- --yes
 
-# Expose the application port (Railway usually provides PORT env var)
+# Expose the application port
 EXPOSE 8080
 
 # Start the server
