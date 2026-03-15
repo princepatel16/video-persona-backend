@@ -62,7 +62,10 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, res) => {
+app.post('/api/process-video-stream', upload.fields([
+    { name: 'doctorImage', maxCount: 1 },
+    { name: 'doctorNameImage', maxCount: 1 }
+]), async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -93,24 +96,20 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
     const runGenerationTask = async () => {
         if (!isRequestActive) {
             console.log("⚠️ Client disconnected. Skipping queued video task.");
-            // Clean up the uploaded file if we skip
-            if (req.file && req.file.path && fs.existsSync(req.file.path)) {
-                fs.unlinkSync(req.file.path);
+            // Clean up files if we skip
+            if (req.files) {
+                Object.values(req.files).flat().forEach(f => {
+                    if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
+                });
             }
             return;
         }
 
-        // 1. Multi-file upload for separate photo and name images
-        upload.fields([
-            { name: 'doctorImage', maxCount: 1 },
-            { name: 'doctorNameImage', maxCount: 1 }
-        ])(req, res, async (err) => {
-            if (err) {
-                console.error("Upload error:", err);
-                return res.status(500).json({ error: 'File upload failed: ' + err.message });
-            }
+        try {
+            console.log("🚀 Starting Dynamic Video Generation...");
+            sendEvent('progress', { percent: 5, status: 'Processing started...' });
 
-            // Extract files
+            // Extract files (already uploaded by the route-level handler)
             const doctorImageFile = req.files && req.files['doctorImage'] ? req.files['doctorImage'][0] : null;
             const nameImageFile = req.files && req.files['doctorNameImage'] ? req.files['doctorNameImage'][0] : null;
 
@@ -238,7 +237,6 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
 
             // 4. Cleanup and Respond
             try {
-                if (fs.existsSync(overlayImagePath)) fs.unlinkSync(overlayImagePath);
                 if (fs.existsSync(tempOverlayPath)) fs.unlinkSync(tempOverlayPath);
             } catch (e) {
                 console.error("Cleanup error:", e);
@@ -248,12 +246,10 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             const downloadUrl = `${protocol}://${req.get('host')}/download/${outputFilename}`;
 
             sendEvent('complete', { url: downloadUrl, name: outputFilename });
-            res.end();
 
         } catch (fatalError) {
             console.error("❌ Fatal Error:", fatalError);
             sendEvent('error', { error: fatalError.message });
-            res.end();
         }
     };
 
