@@ -44,45 +44,26 @@ export const LastSlide: React.FC<LastSlideProps> = ({ doctorName, photoUrl, them
                 />
             )}
             
-            {/* The exact X / Y position passed from the frontend */}
+            {/* The exact X / Y position passed from the frontend (top-left of the composite group) */}
             <div 
                 style={{ 
                     position: 'absolute', 
                     left: `${imageX}px`, 
                     top: `${imageY}px`,
+                    transform: `scale(${scale})`,
+                    opacity, // Let the group fade in slightly as well
                     display: 'flex',
-                    flexDirection: 'column',
                     alignItems: 'center',
-                    // The original FFmpeg overlay point is top-left, but we center the content on that point to match how it scaled. 
-                    // However, we should just follow strictly what the frontend requested:
                 }}
             >
-                <div style={{ transform: `scale(${scale})`, marginBottom: '20px' }}>
-                    <Img
-                        src={staticFile(photoUrl)}
-                        style={{
-                            width: '400px', // Matches your frontend circle size roughly, adjust if needed
-                            height: '400px',
-                            borderRadius: '50%',
-                            objectFit: 'cover',
-                            boxShadow: '0px 10px 30px rgba(0,0,0,0.2)',
-                        }}
-                    />
-                </div>
-
-                <div
+                <Img
+                    src={staticFile(photoUrl)}
                     style={{
-                        opacity,
-                        fontSize: '60px',
-                        fontWeight: 'bold',
-                        color: '#333',
-                        fontFamily: 'sans-serif',
-                        textAlign: 'center',
-                        textTransform: 'uppercase'
+                        // We don't set a fixed width/height here because the PNG is already correctly sized from the frontend canvas
+                        maxWidth: '100%',
                     }}
-                >
-                    {doctorName}
-                </div>
+                    onError={(e) => console.error("Overlay Load Error:", photoUrl)}
+                />
             </div>
         </AbsoluteFill>
     );
