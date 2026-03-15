@@ -174,11 +174,14 @@ app.post('/api/process-video-stream', upload.fields([
                  tempAssets.push(dest);
             }
 
+            const relativeIntroPath = `videos/${staticVideoSrc}`;
             const relativeVideoPath = `videos/${path.basename(dynamicVideoPath)}`;
 
-            console.log("Remotion Args (Multi-Asset):", { doctorName, photoUrl, nameImageUrl, imageX, imageY, relativeVideoPath });
+            // 2. STAGE 1: Render Full Unified Video (Intro + Slide) using Remotion
+            sendEvent('progress', { percent: 15, status: 'Generating full video with Remotion...' });
 
             await renderLastSlide({
+                introVideoPath: relativeIntroPath,
                 doctorName,
                 photoUrl,
                 nameImageUrl,
@@ -186,88 +189,15 @@ app.post('/api/process-video-stream', upload.fields([
                 imageX,
                 imageY,
                 backgroundVideoPath: relativeVideoPath,
-                outputPath: tempOverlayPath
+                outputPath: finalOutputPath // Render directly to final output
             });
 
-            // Cleanup local copies in public/
-            tempAssets.forEach(f => {
-                if (fs.existsSync(f)) fs.unlinkSync(f);
-            });
-
-            // 3. STAGE 2: Concatenate with Static Intro (if needed)
-            if (staticVideoPath && fs.existsSync(staticVideoPath)) {
-                sendEvent('progress', { percent: 60, status: 'Preparing final merge...' });
-
-                const norm1 = path.join(TEMP_DIR, `norm1-${requestId}.mp4`);
-                const norm2 = path.join(TEMP_DIR, `norm2-${requestId}.mp4`);
-                const listPath = path.join(TEMP_DIR, `list-${requestId}.txt`);
-
-                const normalizeToMP4 = (input, output, currentPercent, weight) => {
-                    return new Promise((resolve, reject) => {
-                        ffmpeg(input)
-                            .outputOptions([
-                                '-c:v libx264',
-                                '-preset superfast',
-                                '-pix_fmt yuv420p',
-                                '-vf scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2',
-                                '-r 30',
-                                '-c:a aac',
-                                '-ar 48000',
-                                '-ac 2',
-                                '-threads 1' // Memory safety
-                            ])
-                            .on('progress', (p) => {
-                                const sub = currentPercent + (Math.min(100, Math.max(0, p.percent || 0)) * weight);
-                                sendEvent('progress', { percent: Math.round(sub), status: 'Optimizing segments...' });
-                            })
-                            .on('error', (err) => {
-                                console.error('Normalization error:', err);
-                                reject(err);
-                            })
-                            .on('end', resolve)
-                            .save(output);
-                    });
-                };
-
-                try {
-                    // 1. Normalize Intro (Sequential to save memory)
-                    await normalizeToMP4(staticVideoPath, norm1, 60, 0.15);
-                    // 2. Normalize Overlay
-                    await normalizeToMP4(tempOverlayPath, norm2, 75, 0.15);
-
-                    // 3. Create Concat List file
-                    const listContent = `file '${norm1.replace(/\\/g, '/')}'\nfile '${norm2.replace(/\\/g, '/')}'`;
-                    fs.writeFileSync(listPath, listContent);
-
-                    sendEvent('progress', { percent: 90, status: 'Joining final segments...' });
-
-                    // 4. Final Join (Ultra fast, no re-encoding)
-                    await new Promise((resolve, reject) => {
-                        ffmpeg()
-                            .input(listPath)
-                            .inputOptions(['-f concat', '-safe 0'])
-                            .outputOptions(['-c copy', '-movflags +faststart'])
-                            .on('error', (err) => {
-                                console.error('Concat error:', err);
-                                reject(err);
-                            })
-                            .on('end', resolve)
-                            .save(finalOutputPath);
-                    });
-
-                    // Cleanup intermediate files
-                    [norm1, norm2, listPath].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
-                } catch (err) {
-                    console.error('❌ Merge Error:', err);
-                    throw new Error(`Merge failed: ${err.message}`);
-                }
-            } else {
-                fs.renameSync(tempOverlayPath, finalOutputPath);
-            }
-
-            // 4. Cleanup and Respond
+            // 3. Cleanup and Respond
             try {
-                if (fs.existsSync(tempOverlayPath)) fs.unlinkSync(tempOverlayPath);
+                // Cleanup photo/name temporary assets in public/output
+                tempAssets.forEach(f => {
+                    if (fs.existsSync(f)) fs.unlinkSync(f);
+                });
             } catch (e) {
                 console.error("Cleanup error:", e);
             }

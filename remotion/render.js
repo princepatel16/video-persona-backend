@@ -2,46 +2,37 @@ const { bundle } = require('@remotion/bundler');
 const { renderMedia, selectComposition } = require('@remotion/renderer');
 const path = require('path');
 
-async function renderLastSlide({ doctorName, photoUrl, nameImageUrl, theme, imageX, imageY, backgroundVideoPath, outputPath }) {
-    console.log('--- REMOTION RENDER START ---');
-    console.log('Parameters:', { doctorName, photoUrl, nameImageUrl, theme, imageX, imageY, backgroundVideoPath, outputPath });
+async function renderLastSlide({ introVideoPath, doctorName, photoUrl, nameImageUrl, theme, imageX, imageY, backgroundVideoPath, outputPath }) {
+    console.log('--- REMOTION UNIFIED RENDER START ---');
+    console.log('Parameters:', { introVideoPath, doctorName, photoUrl, nameImageUrl, theme, imageX, imageY, backgroundVideoPath, outputPath });
     
-    // Diagnostic check for common missing libraries
-    try {
-        const { execSync } = require('child_process');
-        console.log('DIAGNOSTIC: checking for libnspr4...');
-        const findNspr = execSync('find /usr/lib /lib -name "libnspr4.so*" 2>/dev/null || true').toString().trim();
-        console.log('DIAGNOSTIC: libnspr4 location:', findNspr || 'NOT FOUND');
-    } catch (e) {
-        console.log('DIAGNOSTIC: could not run find command');
-    }
-
     try {
         console.log('Step 1: Starting Remotion Bundling...');
         const bundledData = await bundle({
             entryPoint: path.resolve(__dirname, 'Root.tsx'),
-            publicDir: path.resolve(__dirname, '..', 'public'), // Point to the global public folder
+            publicDir: path.resolve(__dirname, '..', 'public'),
         });
 
         console.log('Step 2: Selecting Composition...');
-        // Extract the composition to render
         const composition = await selectComposition({
             serveUrl: bundledData,
-            id: 'LastSlide',
+            id: 'UnifiedVideo',
             inputProps: {
-                doctorName,
-                photoUrl,
-                nameImageUrl,
-                theme,
-                imageX,
-                imageY,
-                backgroundVideoPath,
+                introVideoPath,
+                lastSlideProps: {
+                    doctorName,
+                    photoUrl,
+                    nameImageUrl,
+                    theme,
+                    imageX,
+                    imageY,
+                    backgroundVideoPath,
+                }
             },
-            browserLaunchTimeout: 60000, // Increase timeout for Railway
+            browserLaunchTimeout: 60000,
         });
 
-    console.log('Step 3: Rendering Media...', outputPath);
-    // Render to MP4
+    console.log('Step 3: Rendering Unified Media...', outputPath);
     await renderMedia({
         composition,
         serveUrl: bundledData,
@@ -49,26 +40,25 @@ async function renderLastSlide({ doctorName, photoUrl, nameImageUrl, theme, imag
         audioCodec: 'aac',
         outputLocation: outputPath,
         inputProps: {
-            doctorName,
-            photoUrl,
-            nameImageUrl,
-            theme,
-            imageX,
-            imageY,
-            backgroundVideoPath,
+            introVideoPath,
+            lastSlideProps: {
+                doctorName,
+                photoUrl,
+                nameImageUrl,
+                theme,
+                imageX,
+                imageY,
+                backgroundVideoPath,
+            }
         },
         verbose: true,
-        concurrency: 1, // Use 1 CPU core to avoid memory/OOM issues on Railway
+        concurrency: 1,
     });
 
-    console.log('--- REMOTION RENDER COMPLETE ---');
-    console.log('Output Path:', outputPath);
+    console.log('--- REMOTION UNIFIED RENDER COMPLETE ---');
     return outputPath;
 } catch (error) {
     console.error('!!! REMOTION RENDER ERROR !!!');
-    console.error('Error Name:', error.name);
-    console.error('Error Message:', error.message);
-    if (error.stack) console.error('Stack Trace:', error.stack);
     throw error;
 }
 }
