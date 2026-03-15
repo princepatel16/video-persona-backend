@@ -35,7 +35,7 @@ COPY . .
 
 # IMPORTANT: Download and bake the Remotion browser into the image during the build phase
 # This prevents runtime downloads and high memory usage during generation
-RUN npx remotion browser ensure
+RUN ./node_modules/.bin/remotion browser ensure --yes
 
 # Expose the application port (Railway usually provides PORT env var)
 EXPOSE 8080
