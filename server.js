@@ -22,6 +22,9 @@ const UPLOADS_DIR = path.join(__dirname, 'uploads');
 const OUTPUT_DIR = path.join(__dirname, 'public', 'output');
 const TEMP_DIR = path.join(__dirname, 'temp');
 
+// Import Remotion render helper
+const { renderLastSlide } = require('./remotion/render.js');
+
 [UPLOADS_DIR, OUTPUT_DIR, TEMP_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
@@ -138,49 +141,34 @@ app.post('/api/process-video-stream', upload.single('doctorImage'), async (req, 
             const finalOutputPath = path.join(OUTPUT_DIR, outputFilename);
             const tempOverlayPath = path.join(TEMP_DIR, `overlay-${requestId}.mp4`);
 
-            console.log(`🎬 Template: ${templateId}, Portrait: ${isPortrait}`);
-            console.log(`📍 Overlay At: ${imageX}px, ${imageY}px`);
+            // 2. STAGE 1: Render Animated Overlay on Dynamic Slide using Remotion
+            sendEvent('progress', { percent: 15, status: 'Generating animated slide with Remotion...' });
 
-            // 2. STAGE 1: Render Overlay on Dynamic Slide
-            sendEvent('progress', { percent: 15, status: 'Adding overlay to dynamic segment...' });
+            // We temporarily move the uploaded file into the public temp dir so Remotion's puppeteer can access it via HTTP
+            let photoUrl = overlayImagePath; // Fallback to local path if no file (shouldn't happen since multer enforces it)
+            let tempPhotoDest = null;
+            if (req.file) {
+                 tempPhotoDest = path.join(OUTPUT_DIR, path.basename(req.file.path));
+                 fs.copyFileSync(req.file.path, tempPhotoDest);
+                 photoUrl = `http://localhost:${process.env.PORT || 3001}/output/${path.basename(req.file.path)}`;
+            }
 
-            const renderOverlay = () => {
-                return new Promise((resolve, reject) => {
-                    ffmpeg(dynamicVideoPath)
-                        .input(overlayImagePath)
-                        .complexFilter([
-                            {
-                                filter: 'overlay',
-                                options: { x: imageX, y: imageY },
-                                inputs: ['0:v', '1:v'],
-                                outputs: 'v_out'
-                            }
-                        ])
-                        .outputOptions([
-                            '-map [v_out]',
-                            '-map 0:a?', // Map audio if exists
-                            '-c:v libx264',
-                            '-preset ultrafast', // Use lowest CPU/Memory possible
-                            '-crf 30',           // Higher compression
-                            '-threads 1',        // Reduce memory overhead
-                            '-pix_fmt yuv420p'
-                        ])
-                        .on('start', (cmd) => console.log('FFmpeg Overlay Start'))
-                        .on('progress', (p) => {
-                            // Progress for this segment (roughly 15-50% of total)
-                            const subPercent = 15 + (parseInt(p.percent) || 0) * 0.35;
-                            sendEvent('progress', { percent: Math.round(subPercent), status: 'Rendering personalized slide...' });
-                        })
-                        .on('end', resolve)
-                        .on('error', (err) => {
-                            console.error('Overlay Error:', err);
-                            reject(new Error(`Overlay failed: ${err.message}`));
-                        })
-                        .save(tempOverlayPath);
-                });
-            };
+            console.log("Remotion Args:", { doctorName, photoUrl, imageX, imageY, dynamicVideoPath });
 
-            await renderOverlay();
+            await renderLastSlide({
+                doctorName,
+                photoUrl,
+                theme: templateId,
+                imageX,
+                imageY,
+                backgroundVideoPath: dynamicVideoPath,
+                outputPath: tempOverlayPath
+            });
+
+            // Cleanup the temp public photo after Remotion renders it
+            if (tempPhotoDest && fs.existsSync(tempPhotoDest)) {
+                fs.unlinkSync(tempPhotoDest);
+            }
 
             // 3. STAGE 2: Concatenate with Static Intro (if needed)
             if (staticVideoPath && fs.existsSync(staticVideoPath)) {

@@ -17,6 +17,9 @@ export const RemotionRoot: React.FC = () => {
                     doctorName: 'Dr. Jane Doe',
                     photoUrl: 'https://upload.wikimedia.org/wikipedia/commons/a/a0/Andrzej_Person_Kancelaria_Senatu.jpg',
                     theme: 'womens_day_female',
+                    imageX: 50,
+                    imageY: 50,
+                    backgroundVideoPath: '',
                 }}
             />
         </>

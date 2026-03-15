@@ -2,7 +2,7 @@ const { bundle } = require('@remotion/bundler');
 const { renderMedia, selectComposition } = require('@remotion/renderer');
 const path = require('path');
 
-async function renderLastSlide({ doctorName, photoUrl, theme, outputPath }) {
+async function renderLastSlide({ doctorName, photoUrl, theme, imageX, imageY, backgroundVideoPath, outputPath }) {
     console.log('Starting Remotion Bundling...');
     // Bundle the composition
     const bundledData = await bundle({
@@ -19,6 +19,9 @@ async function renderLastSlide({ doctorName, photoUrl, theme, outputPath }) {
             doctorName,
             photoUrl,
             theme,
+            imageX,
+            imageY,
+            backgroundVideoPath,
         },
     });
 
@@ -33,6 +36,9 @@ async function renderLastSlide({ doctorName, photoUrl, theme, outputPath }) {
             doctorName,
             photoUrl,
             theme,
+            imageX,
+            imageY,
+            backgroundVideoPath,
         },
     });
 
