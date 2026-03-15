@@ -199,33 +199,44 @@ app.post('/api/process-video-stream', upload.fields([
                 sendEvent('progress', { percent: 60, status: 'Merging segments...' });
 
                 await new Promise((resolve, reject) => {
-                    // Using complex filter for concatenation - more robust for different durations
+                    // Using complex filter with resampling for maximum compatibility
                     ffmpeg(staticVideoPath)
                         .input(tempOverlayPath)
                         .complexFilter([
-                            {
-                                filter: 'concat',
-                                options: { n: 2, v: 1, a: 1 },
-                                inputs: ['0:v', '0:a', '1:v', '1:a'],
-                                outputs: ['v_final', 'a_final']
-                            }
+                            // Resample audio to 48k/stereo and video to yuv420p to ensure compatibility
+                            '[0:v]format=yuv420p[v0]; [0:a]aresample=48000[a0];',
+                            '[1:v]format=yuv420p[v1]; [1:a]aresample=48000[a1];',
+                            '[v0][a0][v1][a1]concat=n=2:v=1:a=1[v_final][a_final]'
                         ])
                         .outputOptions([
                             '-map [v_final]',
                             '-map [a_final]',
                             '-c:v libx264',
-                            '-preset ultrafast', // Use lowest CPU/Memory possible
-                            '-crf 30',           // Higher compression
-                            '-threads 1',        // Reduce memory overhead
+                            '-c:a aac',
+                            '-b:a 192k',
+                            '-preset ultrafast',
+                            '-crf 28',           // Slightly better quality than 30
+                            '-threads 1',        // Safety for Railway OOM
                             '-y'
                         ])
-                        .on('progress', (p) => {
-                            const subPercent = 60 + (parseInt(p.percent) || 0) * 0.35;
-                            sendEvent('progress', { percent: Math.round(subPercent), status: 'Finalizing video merge...' });
+                        .on('start', (cmd) => {
+                            console.log('FFmpeg Concat Command:', cmd);
                         })
-                        .on('end', resolve)
+                        .on('progress', (p) => {
+                            // Ensure percentage doesn't get stuck at weird values
+                            const rawPercent = Math.min(100, Math.max(0, parseInt(p.percent) || 0));
+                            const subPercent = 60 + (rawPercent * 0.38); // 60% -> 98%
+                            sendEvent('progress', { 
+                                percent: Math.round(subPercent), 
+                                status: `Finalizing video merge... ${rawPercent}%` 
+                            });
+                        })
+                        .on('end', () => {
+                            console.log('✅ Final merge complete');
+                            resolve();
+                        })
                         .on('error', (err) => {
-                            console.error('Concat Error:', err);
+                            console.error('❌ Concat Error:', err);
                             reject(new Error(`Concatenation failed: ${err.message}`));
                         })
                         .save(finalOutputPath);
