@@ -1,5 +1,8 @@
 [phases.setup]
-nixPkgs = ["ffmpeg", "fonts-dejavu-core"]
+nixPkgs = ["ffmpeg", "fonts-dejavu-core", "chromium", "nss", "freetype", "harfbuzz", "alsa-lib", "glib", "mesa"]
+
+[phases.install]
+cmds = ["npm install", "npx remotion browser ensure"]
 
 [start]
 cmd = "node server.js"
