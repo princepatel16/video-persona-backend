@@ -6,6 +6,16 @@ async function renderLastSlide({ doctorName, photoUrl, theme, imageX, imageY, ba
     console.log('--- REMOTION RENDER START ---');
     console.log('Parameters:', { doctorName, photoUrl, theme, imageX, imageY, backgroundVideoPath, outputPath });
     
+    // Diagnostic check for common missing libraries
+    try {
+        const { execSync } = require('child_process');
+        console.log('DIAGNOSTIC: checking for libnspr4...');
+        const findNspr = execSync('find /usr/lib /lib -name "libnspr4.so*" 2>/dev/null || true').toString().trim();
+        console.log('DIAGNOSTIC: libnspr4 location:', findNspr || 'NOT FOUND');
+    } catch (e) {
+        console.log('DIAGNOSTIC: could not run find command');
+    }
+
     try {
         console.log('Step 1: Starting Remotion Bundling...');
     const bundledData = await bundle({
@@ -43,7 +53,8 @@ async function renderLastSlide({ doctorName, photoUrl, theme, imageX, imageY, ba
             imageY,
             backgroundVideoPath,
         },
-        verbose: true, // Enable more verbose logging from Remotion
+        verbose: true,
+        concurrency: 1, // Use 1 CPU core to avoid memory/OOM issues on Railway
     });
 
     console.log('--- REMOTION RENDER COMPLETE ---');
