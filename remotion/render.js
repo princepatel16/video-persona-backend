@@ -2,9 +2,9 @@ const { bundle } = require('@remotion/bundler');
 const { renderMedia, selectComposition } = require('@remotion/renderer');
 const path = require('path');
 
-async function renderLastSlide({ doctorName, photoUrl, theme, imageX, imageY, backgroundVideoPath, outputPath }) {
+async function renderLastSlide({ doctorName, photoUrl, nameImageUrl, theme, imageX, imageY, backgroundVideoPath, outputPath }) {
     console.log('--- REMOTION RENDER START ---');
-    console.log('Parameters:', { doctorName, photoUrl, theme, imageX, imageY, backgroundVideoPath, outputPath });
+    console.log('Parameters:', { doctorName, photoUrl, nameImageUrl, theme, imageX, imageY, backgroundVideoPath, outputPath });
     
     // Diagnostic check for common missing libraries
     try {
@@ -50,6 +50,7 @@ async function renderLastSlide({ doctorName, photoUrl, theme, imageX, imageY, ba
         inputProps: {
             doctorName,
             photoUrl,
+            nameImageUrl,
             theme,
             imageX,
             imageY,
