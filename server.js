@@ -163,7 +163,17 @@ app.post('/api/render-slide', upload.fields([
         }
     };
 
-    taskQueue.push({ execute: runRenderTask });
+    const task = { 
+        execute: runRenderTask,
+        notifyPosition: (pos) => sendEvent('queue', { position: pos })
+    };
+    taskQueue.push(task);
+    
+    // Initial position if waiting
+    if (isProcessingQueue) {
+        sendEvent('queue', { position: taskQueue.length });
+    }
+    
     processQueue();
 });
 
@@ -266,7 +276,17 @@ app.post('/api/merge-video', express.json(), async (req, res) => {
         }
     };
 
-    taskQueue.push({ execute: runMergeTask });
+    const task = { 
+        execute: runMergeTask,
+        notifyPosition: (pos) => sendEvent('queue', { position: pos })
+    };
+    taskQueue.push(task);
+
+    // Initial position if waiting
+    if (isProcessingQueue) {
+        sendEvent('queue', { position: taskQueue.length });
+    }
+
     processQueue();
 });
 
