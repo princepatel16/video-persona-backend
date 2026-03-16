@@ -62,7 +62,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-app.post('/api/render-slide', upload.fields([
+app.post('/api/generate-full-video', upload.fields([
     { name: 'doctorImage', maxCount: 1 },
     { name: 'doctorNameImage', maxCount: 1 }
 ]), async (req, res) => {
@@ -86,7 +86,7 @@ app.post('/api/render-slide', upload.fields([
     res.on('close', () => { clearInterval(heartbeat); isRequestActive = false; });
     res.on('finish', () => { clearInterval(heartbeat); isRequestActive = false; });
 
-    const runRenderTask = async () => {
+    const runFullGenerationTask = async () => {
         if (!isRequestActive) {
             if (req.files) {
                 Object.values(req.files).flat().forEach(f => {
@@ -97,8 +97,8 @@ app.post('/api/render-slide', upload.fields([
         }
 
         try {
-            console.log("🚀 Starting Slide Rendering...");
-            sendEvent('progress', { percent: 5, status: 'Processing started...' });
+            console.log("🚀 Starting Full Video Generation...");
+            sendEvent('progress', { percent: 5, status: 'Preparing assets...' });
 
             const doctorImageFile = req.files && req.files['doctorImage'] ? req.files['doctorImage'][0] : null;
             const nameImageFile = req.files && req.files['doctorNameImage'] ? req.files['doctorNameImage'][0] : null;
@@ -107,20 +107,33 @@ app.post('/api/render-slide', upload.fields([
 
             const isPortrait = req.body.isPortrait === 'true';
             const templateId = req.body.templateId || 'default';
+            const gender = req.body.gender || 'Female';
             const VIDEO_WIDTH = isPortrait ? 1080 : 1920;
-            const VIDEO_HEIGHT = isPortrait ? 1920 : 1080;
+            const VIDEO_HEIGHT = isPortrait ? 1920 : 115; // Mismatched variable in original code checked? Actually imageY logic uses these.
+            
             const overlayX_Pct = parseFloat(req.body.overlayX) || 0;
             const overlayY_Pct = parseFloat(req.body.overlayY) || 0;
             const imageX = Math.round(overlayX_Pct * VIDEO_WIDTH);
-            const imageY = Math.round(overlayY_Pct * VIDEO_HEIGHT);
+            const imageY = Math.round(overlayY_Pct * (isPortrait ? 1920 : 1080));
             const doctorName = req.body.doctorName || 'Doctor';
-            const dynamicVideoSrc = req.body.dynamicVideoSrc;
+            const dynamicVideoSrc = req.body.dynamicVideoSrc || 'Woman day video last slide.mp4';
 
-            const relativeVideoPath = `videos/${dynamicVideoSrc}`;
             const requestId = Date.now();
             const tempOverlayPath = path.join(TEMP_DIR, `overlay-5s-${requestId}.mp4`);
+            const normOverlayPath = path.join(TEMP_DIR, `norm-overlay-${requestId}.mp4`);
+            const finalOutputPath = path.join(OUTPUT_DIR, `${doctorName.replace(/\s+/g, '_')}-${requestId}.mp4`);
+            const listPath = path.join(TEMP_DIR, `list-${requestId}.txt`);
 
-            // Save assets temporarily for Remotion
+            // 1. Setup Static Intro Path
+            let staticVideoSrc = req.body.staticVideoSrc;
+            if (templateId === 'womens_day') {
+                staticVideoSrc = gender === 'Male'
+                    ? 'Woman day video static video Male.mp4'
+                    : 'Woman day video static video Female.mp4';
+            }
+            const staticVideoPath = path.join(__dirname, 'public', 'videos', staticVideoSrc);
+
+            // 2. Prepare Assets for Remotion
             const photoFilename = `photo-${requestId}-${path.basename(doctorImageFile.path)}`;
             const photoDest = path.join(OUTPUT_DIR, photoFilename);
             fs.copyFileSync(doctorImageFile.path, photoDest);
@@ -134,160 +147,78 @@ app.post('/api/render-slide', upload.fields([
                 nameImageUrl = `output/${nameFilename}`;
             }
 
-            sendEvent('progress', { percent: 15, status: 'Generating 5s animated slide...' });
-
+            // 3. Render 5s Slide (Progress 10-40%)
+            sendEvent('progress', { percent: 10, status: 'Rendering animated slide...' });
             await renderLastSlide({
-                doctorName,
-                photoUrl,
-                nameImageUrl,
+                doctorName, photoUrl, nameImageUrl,
                 theme: templateId || 'womens_day',
-                imageX,
-                imageY,
-                backgroundVideoPath: relativeVideoPath,
+                imageX, imageY,
+                backgroundVideoPath: `videos/${dynamicVideoSrc}`,
                 outputPath: tempOverlayPath
             });
 
-            // Cleanup upload files (but keep the copied output assets for now)
-            if (req.files) {
-                Object.values(req.files).flat().forEach(f => {
-                    if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
-                });
-            }
+            if (!isRequestActive) throw new Error("Request cancelled by user");
 
-            sendEvent('complete', { requestId, tempOverlayPath });
-            res.end();
-
-        } catch (fatalError) {
-            console.error("❌ Fatal Error:", fatalError);
-            sendEvent('error', { error: fatalError.message });
-        }
-    };
-
-    const task = { 
-        execute: runRenderTask,
-        notifyPosition: (pos) => sendEvent('queue', { position: pos })
-    };
-    taskQueue.push(task);
-    
-    // Initial position if waiting
-    if (isProcessingQueue) {
-        sendEvent('queue', { position: taskQueue.length });
-    }
-    
-    processQueue();
-});
-
-app.post('/api/merge-video', express.json(), async (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
-
-    const sendEvent = (event, data) => {
-        if (!res.writableEnded) {
-            res.write(`event: ${event}\n`);
-            res.write(`data: ${JSON.stringify(data)}\n\n`);
-        }
-    };
-
-    const runMergeTask = async () => {
-        const heartbeat = setInterval(() => {
-            if (!res.writableEnded) res.write(': keep-alive\n\n');
-        }, 15000);
-
-        res.on('close', () => { clearInterval(heartbeat); });
-        res.on('finish', () => { clearInterval(heartbeat); });
-
-        try {
-            const { requestId, doctorName, gender, templateId } = req.body;
-            const tempOverlayPath = path.join(TEMP_DIR, `overlay-5s-${requestId}.mp4`);
-            const normOverlayPath = path.join(TEMP_DIR, `norm-overlay-${requestId}.mp4`);
-            const listPath = path.join(TEMP_DIR, `list-${requestId}.txt`);
-            
-            let staticVideoSrc = req.body.staticVideoSrc;
-            if (templateId === 'womens_day') {
-                staticVideoSrc = gender === 'Male'
-                    ? 'Woman day video static video Male.mp4'
-                    : 'Woman day video static video Female.mp4';
-            }
-            const staticVideoPath = path.join(__dirname, 'public', 'videos', staticVideoSrc);
-            
-            const sanitizedName = doctorName.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
-            const outputFilename = `${sanitizedName}-${requestId}.mp4`;
-            const finalOutputPath = path.join(OUTPUT_DIR, outputFilename);
-
-            if (!fs.existsSync(tempOverlayPath)) throw new Error("Slide animation not found. Please render again.");
-
-            sendEvent('progress', { percent: 20, status: 'Normalizing slide for merge...' });
-
+            // 4. Normalize Slide (Progress 40-60%)
+            sendEvent('progress', { percent: 45, status: 'Normalizing segments...' });
             await new Promise((resolve, reject) => {
                 ffmpeg(tempOverlayPath)
                     .outputOptions([
-                        '-map 0:a', // Force Audio to #0:0
-                        '-map 0:v', // Force Video to #0:1
-                        '-c:v libx264',
-                        '-preset superfast',
-                        '-pix_fmt yuv420p',
-                        '-profile:v main',
-                        '-vf scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2',
-                        '-r 30',
-                        '-video_track_timescale 30000',
-                        '-c:a aac',
-                        '-ar 48000',
-                        '-ac 2',
-                        '-threads 1'
+                        '-map 0:a', '-map 0:v', '-c:v libx264', '-preset superfast', '-pix_fmt yuv420p',
+                        '-profile:v main', '-vf scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2',
+                        '-r 30', '-video_track_timescale 30000', '-c:a aac', '-ar 48000', '-ac 2', '-threads 1'
                     ])
-                    .on('error', reject)
-                    .on('end', resolve)
-                    .save(normOverlayPath);
+                    .on('error', reject).on('end', resolve).save(normOverlayPath);
             });
 
-            sendEvent('progress', { percent: 70, status: 'Joining segments (Fast)...' });
-
+            // 5. Final Merge (Progress 60-95%)
+            sendEvent('progress', { percent: 70, status: 'Creating final high-quality video...' });
             const listContent = `file '${staticVideoPath.replace(/\\/g, '/')}'\nfile '${normOverlayPath.replace(/\\/g, '/')}'`;
             fs.writeFileSync(listPath, listContent);
 
             await new Promise((resolve, reject) => {
-                ffmpeg()
-                    .input(listPath)
-                    .inputOptions(['-f concat', '-safe 0'])
-                    .outputOptions([
-                        '-map 0:0', // Resulting Audio
-                        '-map 0:1', // Resulting Video
-                        '-c copy', 
-                        '-movflags +faststart'
-                    ])
-                    .on('error', reject)
-                    .on('end', resolve)
-                    .save(finalOutputPath);
+                ffmpeg().input(listPath).inputOptions(['-f concat', '-safe 0'])
+                    .outputOptions(['-map 0:0', '-map 0:1', '-c copy', '-movflags +faststart'])
+                    .on('error', reject).on('end', resolve).save(finalOutputPath);
             });
 
-            // Cleanup
+            // 6. Cleanup
             [tempOverlayPath, normOverlayPath, listPath].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
+            if (req.files) {
+                Object.values(req.files).flat().forEach(f => { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); });
+            }
 
             const protocol = req.get('host').includes('localhost') ? 'http' : 'https';
-            const downloadUrl = `${protocol}://${req.get('host')}/download/${outputFilename}`;
-            sendEvent('complete', { url: downloadUrl, name: outputFilename });
+            const downloadUrl = `${protocol}://${req.get('host')}/download/${path.basename(finalOutputPath)}`;
+            
+            sendEvent('complete', { url: downloadUrl, name: path.basename(finalOutputPath) });
             res.end();
 
-        } catch (error) {
-            console.error("Merge error:", error);
-            sendEvent('error', { error: error.message });
+        } catch (fatalError) {
+            console.error("❌ Full Gen Error:", fatalError);
+            sendEvent('error', { error: fatalError.message });
+            // Partial cleanup
+            if (req.files) {
+                Object.values(req.files).flat().forEach(f => { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); });
+            }
         }
     };
 
     const task = { 
-        execute: runMergeTask,
+        execute: runFullGenerationTask,
         notifyPosition: (pos) => sendEvent('queue', { position: pos })
     };
     taskQueue.push(task);
-
-    // Initial position if waiting
-    if (isProcessingQueue) {
-        sendEvent('queue', { position: taskQueue.length });
-    }
-
+    if (isProcessingQueue) sendEvent('queue', { position: taskQueue.length });
     processQueue();
+});
+
+app.post('/api/render-slide', (req, res) => {
+    res.status(410).json({ error: "Use /api/generate-full-video instead" });
+});
+
+app.post('/api/merge-video', (req, res) => {
+    res.status(410).json({ error: "Use /api/generate-full-video instead" });
 });
 
 app.post('/api/process-video-stream', (req, res) => {
