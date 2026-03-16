@@ -48,7 +48,7 @@ export const LastSlide: React.FC<LastSlideProps> = ({
                     src={staticFile(backgroundVideoPath)} 
                     style={{ position: 'absolute', width: '100%', height: '100%', objectFit: 'cover' }}
                     muted={false}
-                    volume={0}
+                    volume={1}
                 />
             )}
             
@@ -64,7 +64,7 @@ export const LastSlide: React.FC<LastSlideProps> = ({
 
                 {/* 2. Text (Animated with Fade) */}
                 {nameImageUrl && (
-                    <div style={{ opacity: textOpacity, marginLeft: '-40px' }}>
+                    <div style={{ opacity: textOpacity, marginLeft: '10px' }}>
                         <Img
                             src={staticFile(nameImageUrl)}
                             style={{ maxWidth: '100%' }}

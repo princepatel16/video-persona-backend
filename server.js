@@ -155,6 +155,7 @@ app.post('/api/render-slide', upload.fields([
             }
 
             sendEvent('complete', { requestId, tempOverlayPath });
+            res.end();
 
         } catch (fatalError) {
             console.error("❌ Fatal Error:", fatalError);
@@ -180,6 +181,13 @@ app.post('/api/merge-video', express.json(), async (req, res) => {
     };
 
     const runMergeTask = async () => {
+        const heartbeat = setInterval(() => {
+            if (!res.writableEnded) res.write(': keep-alive\n\n');
+        }, 15000);
+
+        res.on('close', () => { clearInterval(heartbeat); });
+        res.on('finish', () => { clearInterval(heartbeat); });
+
         try {
             const { requestId, doctorName, gender, templateId } = req.body;
             const tempOverlayPath = path.join(TEMP_DIR, `overlay-5s-${requestId}.mp4`);
@@ -205,6 +213,8 @@ app.post('/api/merge-video', express.json(), async (req, res) => {
             await new Promise((resolve, reject) => {
                 ffmpeg(tempOverlayPath)
                     .outputOptions([
+                        '-map 0:a', // Force Audio to #0:0
+                        '-map 0:v', // Force Video to #0:1
                         '-c:v libx264',
                         '-preset superfast',
                         '-pix_fmt yuv420p',
@@ -231,7 +241,12 @@ app.post('/api/merge-video', express.json(), async (req, res) => {
                 ffmpeg()
                     .input(listPath)
                     .inputOptions(['-f concat', '-safe 0'])
-                    .outputOptions(['-c copy', '-movflags +faststart'])
+                    .outputOptions([
+                        '-map 0:0', // Resulting Audio
+                        '-map 0:1', // Resulting Video
+                        '-c copy', 
+                        '-movflags +faststart'
+                    ])
                     .on('error', reject)
                     .on('end', resolve)
                     .save(finalOutputPath);
@@ -243,6 +258,7 @@ app.post('/api/merge-video', express.json(), async (req, res) => {
             const protocol = req.get('host').includes('localhost') ? 'http' : 'https';
             const downloadUrl = `${protocol}://${req.get('host')}/download/${outputFilename}`;
             sendEvent('complete', { url: downloadUrl, name: outputFilename });
+            res.end();
 
         } catch (error) {
             console.error("Merge error:", error);
